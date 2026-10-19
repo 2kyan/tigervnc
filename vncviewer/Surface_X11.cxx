@@ -21,11 +21,14 @@
 #endif
 
 #include <assert.h>
+#include <math.h>
 #include <stdlib.h>
 
 #include <stdexcept>
 
+#include <FL/Fl.H>
 #include <FL/Fl_RGB_Image.H>
+#include <FL/Fl_Window.H>
 #include <FL/x.H>
 
 #include "Surface.h"
@@ -43,15 +46,94 @@ void Surface::clear(unsigned char r, unsigned char g, unsigned char b, unsigned 
                        0, 0, width(), height());
 }
 
+// FLTK 1.4 coordinates are in scaled units, but we draw directly to
+// the window, which is in physical pixels. So we need to scale
+// everything when we hit the actual window.
+static float window_scale()
+{
+#if FL_API_VERSION >= 10400
+  Fl_Window* win;
+
+  win = Fl_Window::current();
+  if (win == nullptr)
+    return 1.0;
+
+  return Fl::screen_scale(win->screen_num());
+#else
+  return 1.0;
+#endif
+}
+
+// Composites part of src to the current window, scaling as needed.
+static void composite_to_window(int op, Picture src, Picture mask,
+                                XRenderPictFormat* visFormat,
+                                int src_x, int src_y, int dst_x, int dst_y,
+                                int dst_w, int dst_h)
+{
+  Picture winPict;
+  float scale;
+
+  winPict = XRenderCreatePicture(fl_display, fl_window, visFormat, 0, nullptr);
+
+  scale = window_scale();
+  if (scale == 1.0) {
+    XRenderComposite(fl_display, op, src, mask, winPict,
+                     src_x, src_y, 0, 0, dst_x, dst_y, dst_w, dst_h);
+  } else {
+    XTransform transform = {{
+      { XDoubleToFixed(1.0 / scale), 0, 0 },
+      { 0, XDoubleToFixed(1.0 / scale), 0 },
+      { 0, 0, XDoubleToFixed(1.0) },
+    }};
+    XTransform identity = {{
+      { XDoubleToFixed(1.0), 0, 0 },
+      { 0, XDoubleToFixed(1.0), 0 },
+      { 0, 0, XDoubleToFixed(1.0) },
+    }};
+    XRenderPictureAttributes pa;
+    int x1, y1, x2, y2;
+
+    // Cover every physical pixel touched by the area
+    x1 = floorf(dst_x * scale);
+    y1 = floorf(dst_y * scale);
+    x2 = ceilf((dst_x + dst_w) * scale);
+    y2 = ceilf((dst_y + dst_h) * scale);
+
+    // Integer factors can just duplicate pixels and stay sharp
+    if (scale == floorf(scale))
+      XRenderSetPictureFilter(fl_display, src, FilterNearest, nullptr, 0);
+    else
+      XRenderSetPictureFilter(fl_display, src, FilterBilinear, nullptr, 0);
+    XRenderSetPictureTransform(fl_display, src, &transform);
+
+    // Filtering samples beyond the edges, so clamp those to the edge
+    // pixels rather than letting them fade to transparent black
+    pa.repeat = RepeatPad;
+    XRenderChangePicture(fl_display, src, CPRepeat, &pa);
+
+    // The source coordinates get transformed, so they need to be given
+    // in physical units as well. This is only exact for fractional
+    // factors if src and dst coordinates are equal, which is the case
+    // for DesktopWindow's offscreen buffer (the only user on X11).
+    XRenderComposite(fl_display, op, src, mask, winPict,
+                     x1 + lroundf((src_x - dst_x) * scale),
+                     y1 + lroundf((src_y - dst_y) * scale),
+                     0, 0, x1, y1, x2 - x1, y2 - y1);
+
+    pa.repeat = RepeatNone;
+    XRenderChangePicture(fl_display, src, CPRepeat, &pa);
+    XRenderSetPictureTransform(fl_display, src, &identity);
+    XRenderSetPictureFilter(fl_display, src, FilterNearest, nullptr, 0);
+  }
+
+  XRenderFreePicture(fl_display, winPict);
+}
+
 void Surface::draw(int src_x, int src_y, int dst_x, int dst_y,
                    int dst_w, int dst_h)
 {
-  Picture winPict;
-
-  winPict = XRenderCreatePicture(fl_display, fl_window, visFormat, 0, nullptr);
-  XRenderComposite(fl_display, PictOpSrc, picture, None, winPict,
-                   src_x, src_y, 0, 0, dst_x, dst_y, dst_w, dst_h);
-  XRenderFreePicture(fl_display, winPict);
+  composite_to_window(PictOpSrc, picture, None, visFormat,
+                      src_x, src_y, dst_x, dst_y, dst_w, dst_h);
 }
 
 void Surface::draw(Surface* dst, int src_x, int src_y,
@@ -91,13 +173,11 @@ static Picture alpha_mask(int a)
 void Surface::blend(int src_x, int src_y, int dst_x, int dst_y,
                     int dst_w, int dst_h, int a)
 {
-  Picture winPict, alpha;
+  Picture alpha;
 
-  winPict = XRenderCreatePicture(fl_display, fl_window, visFormat, 0, nullptr);
   alpha = alpha_mask(a);
-  XRenderComposite(fl_display, PictOpOver, picture, alpha, winPict,
-                   src_x, src_y, 0, 0, dst_x, dst_y, dst_w, dst_h);
-  XRenderFreePicture(fl_display, winPict);
+  composite_to_window(PictOpOver, picture, alpha, visFormat,
+                      src_x, src_y, dst_x, dst_y, dst_w, dst_h);
 
   if (alpha != None)
     XRenderFreePicture(fl_display, alpha);

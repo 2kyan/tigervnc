@@ -143,7 +143,7 @@ if(BUILD_STATIC)
     set(HOGWEED_LIBRARIES "-Wl,-Bstatic -lhogweed -lnettle -lgmp -Wl,-Bdynamic")
   endif()
 
-  if(DEFINED FLTK_LIBRARIES)
+  if(DEFINED FLTK_LIBRARIES AND NOT USE_BUNDLED_FLTK)
     set(FLTK_LIBRARIES "-Wl,-Bstatic -lfltk_images -lpng -ljpeg -lfltk -Wl,-Bdynamic")
 
     if(WIN32)

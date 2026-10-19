@@ -22,8 +22,11 @@
 
 #include <assert.h>
 #include <limits.h>
+#include <math.h>
 #include <unistd.h>
 
+#include <FL/Fl.H>
+#include <FL/Fl_Window.H>
 #include <FL/x.H>
 
 #include "x11.h"
@@ -150,12 +153,25 @@ void x11_win_get_coords(Fl_Window* win, int* x, int* y, int* w, int* h)
   assert(h);
 
   XGetWindowAttributes(fl_display, fl_xid(win), &actual);
-
-  *x = actual.x;
-  *y = actual.y;
-
   XTranslateCoordinates(fl_display, fl_xid(win), actual.root,
-                        0, 0, w, h, &cr);
+                        0, 0, x, y, &cr);
+
+  *w = actual.width;
+  *h = actual.height;
+
+#if FL_API_VERSION >= 10400
+  float s;
+
+  // FLTK 1.4 works in scaled units, so convert the same way it does
+  // for ConfigureNotify events so the result can be compared directly
+  s = Fl::screen_scale(win->screen_num());
+  if (s != 1.0) {
+    *x = rint(*x / s);
+    *y = rint(*y / s);
+    *w = ceil(*w / s);
+    *h = ceil(*h / s);
+  }
+#endif
 }
 
 void x11_win_may_grab(Fl_Window* win)

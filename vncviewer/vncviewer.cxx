@@ -57,6 +57,7 @@
 #include <FL/Fl_PNG_Image.H>
 #include <FL/Fl_Sys_Menu_Bar.H>
 #include <FL/fl_ask.H>
+#include <FL/x.H>
 
 #include "fltk/Fl_Password_Input.h"
 #include "fltk/theme.h"
@@ -73,6 +74,13 @@
 #endif
 
 static core::LogWriter vlog("main");
+
+#if !defined(WIN32) && !defined(__APPLE__) && FL_API_VERSION >= 10400
+// We rely heavily on X11 specific code, so FLTK must not pick its
+// Wayland backend. FLTK looks this symbol up at runtime, which is why
+// vncviewer needs to export its symbols.
+FL_EXPORT bool fl_disable_wayland = true;
+#endif
 
 char vncServerName[VNCSERVERNAMELEN] = { '\0' };
 

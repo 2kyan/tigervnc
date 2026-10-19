@@ -71,6 +71,11 @@ target_include_directories(vncviewer SYSTEM PUBLIC ${FLTK_INCLUDE_DIR})
 target_link_libraries(vncviewer rfbclient rfb network rdr core)
 target_link_libraries(vncviewer ${FLTK_LIBRARIES})
 
+if(UNIX AND NOT APPLE AND FLTK_1_4)
+  # FLTK looks up fl_disable_wayland in the executable at runtime
+  set_target_properties(vncviewer PROPERTIES ENABLE_EXPORTS TRUE)
+endif()
+
 if(GNUTLS_FOUND)
   target_include_directories(vncviewer SYSTEM PUBLIC ${GNUTLS_INCLUDE_DIR})
   target_link_libraries(vncviewer ${GNUTLS_LIBRARIES})
