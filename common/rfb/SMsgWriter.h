@@ -69,6 +69,16 @@ namespace rfb {
     // writeFence() sends a new fence request or response to the client.
     void writeFence(uint32_t flags, unsigned len, const uint8_t data[]);
 
+    // writeAudioBegin()/writeAudioData()/writeAudioEnd() send the
+    // TigerVNC-native audio extension's stream messages (see
+    // audioTypes.h). Written immediately, unlike the pseudo-rect
+    // setters below -- audio is its own message type, not part of the
+    // FramebufferUpdate rect sequence. Each throws std::logic_error if
+    // the client never advertised pseudoEncodingTigerAudio.
+    void writeAudioBegin();
+    void writeAudioData(const uint8_t* data, size_t length);
+    void writeAudioEnd();
+
     // writeEndOfContinuousUpdates() indicates that we have left continuous
     // updates mode.
     void writeEndOfContinuousUpdates();
@@ -94,6 +104,15 @@ namespace rfb {
 
     // let the client know we support extended mouse button support
     void writeExtendedMouseButtonsSupport();
+
+    // let the client know we support the TigerVNC-native audio
+    // extension (see audioTypes.h) -- this is what makes the client's
+    // own automatic requestTigerAudio()/writeAudioControl(true) fire;
+    // without it the client never learns the server understands the
+    // extension, no matter how ready writeAudioBegin()/writeAudioData()
+    // are to send. Deferred like writeQEMUKeyEvent() above -- actually
+    // written as part of the next update, not immediately.
+    void writeTigerAudioSupport();
 
     // needFakeUpdate() returns true when an immediate update is needed in
     // order to flush out pseudo-rectangles to the client.
@@ -151,6 +170,7 @@ namespace rfb {
     void writeLEDStateRect(uint8_t state);
     void writeQEMUKeyEventRect();
     void writeExtendedMouseButtonsRect();
+    void writeTigerAudioSupportRect();
 
     ClientParams* client;
     rdr::OutStream* os;
@@ -164,6 +184,7 @@ namespace rfb {
     bool needLEDState;
     bool needQEMUKeyEvent;
     bool needExtMouseButtonsEvent;
+    bool needTigerAudioSupport;
 
     typedef struct {
       uint16_t reason, result;

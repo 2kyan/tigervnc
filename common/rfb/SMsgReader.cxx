@@ -35,6 +35,7 @@
 
 #include <rfb/msgTypes.h>
 #include <rfb/qemuTypes.h>
+#include <rfb/audioTypes.h>
 #include <rfb/clipboardTypes.h>
 #include <rfb/Exception.h>
 #include <rfb/PixelFormat.h>
@@ -111,6 +112,9 @@ bool SMsgReader::readMsg()
     break;
   case msgTypeQEMUClientMessage:
     ret = readQEMUMessage();
+    break;
+  case msgTypeAudioControl:
+    ret = readAudioControl();
     break;
   default:
     vlog.error(_("Unknown message type %d"), currentMsgType);
@@ -517,5 +521,19 @@ bool SMsgReader::readQEMUKeyEvent()
     return true;
   }
   handler->keyEvent(keysym, keycode, down);
+  return true;
+}
+
+bool SMsgReader::readAudioControl()
+{
+  uint8_t op;
+
+  if (!is->hasData(1))
+    return false;
+
+  op = is->readU8();
+
+  handler->audioControl(op == audioControlEnable);
+
   return true;
 }

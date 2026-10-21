@@ -73,6 +73,8 @@ namespace rfb {
     void writeQEMUAudioSetFormat(uint8_t sampleFormat, uint8_t channels,
                                  uint32_t frequency);
 
+    void writeAudioControl(bool enable);
+
   protected:
     void startMsg(int type);
     void endMsg();

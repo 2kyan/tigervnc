@@ -219,6 +219,8 @@ namespace rfb {
 
     void supportsQEMUAudio() override;
 
+    void supportsTigerAudio() override;
+
     void supportsExtendedMouseButtons() override;
 
     void serverInit(int width, int height, const PixelFormat& pf,
@@ -317,6 +319,18 @@ namespace rfb {
     bool supportsDesktopResize;
     bool supportsLEDState;
     bool supportsAudio;
+    // Can decode the TigerVNC-native (Opus) audio extension, in
+    // addition to QEMU's raw PCM one
+    bool supportsNativeAudio;
+
+    // Which wire format requestTigerAudio()/requestAudio() actually
+    // asked for -- distinct from server.supportsTigerAudio/
+    // supportsQEMUAudio, which only say what the server *advertised*
+    // it understands (a server could in principle advertise both). A
+    // subclass's handleAudioData() override should key its decode
+    // path off this, not off the capability flags, since a server is
+    // only supposed to send the format actually requested.
+    bool audioFormatIsNative;
 
   private:
     bool processVersionMsg();
@@ -329,6 +343,7 @@ namespace rfb {
     void securityCompleted();
 
     void requestAudio();
+    void requestTigerAudio();
     void requestNewUpdate();
     void updateEncodings();
 

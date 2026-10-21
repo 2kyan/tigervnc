@@ -84,6 +84,9 @@ XserverDesktop::XserverDesktop(int screenIndex_,
     server(0), listeners(listeners_),
     shadowFramebuffer(nullptr),
     queryConnectId(0), queryConnectTimer(this)
+#ifdef VNC_AUDIO_CAPTURE
+    , audioCapture(nullptr), audioTimer(this)
+#endif
 {
   format = pf;
 
@@ -92,6 +95,29 @@ XserverDesktop::XserverDesktop(int screenIndex_,
 
   for (network::SocketListener* listener : listeners)
     vncSetNotifyFd(listener->getFd(), screenIndex, true, false);
+
+#ifdef VNC_AUDIO_CAPTURE
+  // Optional: if no PulseAudio sound server is reachable, log it and
+  // carry on video-only (same "degrade gracefully" philosophy this
+  // driver already applies elsewhere).
+  audioCapture = new AudioCapturePulse(
+    [this](const uint8_t* pcm, size_t length) { audioCaptureData(pcm, length); },
+    [this]() { audioCaptureBegin(); },
+    [this]() { audioCaptureEnd(); });
+  if (!audioCapture->isAvailable())
+    vlog.info("No sound server found -- will keep retrying in the background");
+  // Lets a client toggling audio on (VNCSConnectionST::
+  // handleAudioControl()) trigger an immediate reconnect attempt if the
+  // sound server wasn't available yet -- on top of AudioCapturePulse's
+  // own periodic automatic retry. See AudioCapturePulse::retryNow()'s
+  // own comment. Same static_cast reasoning as the drain code below:
+  // server always actually points at the VNCServerST we constructed
+  // above, but setAudioRetryCallback() isn't part of the abstract
+  // rfb::VNCServer interface this field is declared as.
+  static_cast<rfb::VNCServerST*>(server)->setAudioRetryCallback(
+    [this]() { audioCapture->retryNow(); });
+  audioTimer.start(20);
+#endif
 }
 
 XserverDesktop::~XserverDesktop()
@@ -103,6 +129,9 @@ XserverDesktop::~XserverDesktop()
   }
   if (shadowFramebuffer)
     delete [] shadowFramebuffer;
+#ifdef VNC_AUDIO_CAPTURE
+  delete audioCapture;
+#endif
   delete server;
 }
 
@@ -561,6 +590,26 @@ void XserverDesktop::keyEvent(uint32_t keysym, uint32_t keycode, bool down)
   vncKeyboardEvent(keysym, keycode, down);
 }
 
+#ifdef VNC_AUDIO_CAPTURE
+void XserverDesktop::audioCaptureBegin()
+{
+  std::lock_guard<std::mutex> lock(audioMutex);
+  audioEvents.push_back({AudioEvent::Begin, {}});
+}
+
+void XserverDesktop::audioCaptureData(const uint8_t* pcm, size_t length)
+{
+  std::lock_guard<std::mutex> lock(audioMutex);
+  audioEvents.push_back({AudioEvent::Data, std::vector<uint8_t>(pcm, pcm + length)});
+}
+
+void XserverDesktop::audioCaptureEnd()
+{
+  std::lock_guard<std::mutex> lock(audioMutex);
+  audioEvents.push_back({AudioEvent::End, {}});
+}
+#endif
+
 void XserverDesktop::handleTimeout(core::Timer* t)
 {
   if (t == &queryConnectTimer) {
@@ -568,4 +617,27 @@ void XserverDesktop::handleTimeout(core::Timer* t)
                               _("The attempt to prompt the user to "
                                 "accept the connection failed"));
   }
+
+#ifdef VNC_AUDIO_CAPTURE
+  if (t == &audioTimer) {
+    std::deque<AudioEvent> drained;
+    {
+      std::lock_guard<std::mutex> lock(audioMutex);
+      drained.swap(audioEvents);
+    }
+    // server always actually points at a VNCServerST -- we constructed
+    // it ourselves above -- but sendAudioBegin/Data/End() and
+    // isAudioStreaming() are VNCServerST-only methods, not part of the
+    // abstract rfb::VNCServer interface this field is declared as.
+    auto* vncServerST = static_cast<rfb::VNCServerST*>(server);
+    for (const AudioEvent& e : drained) {
+      switch (e.kind) {
+      case AudioEvent::Begin: vncServerST->sendAudioBegin(); break;
+      case AudioEvent::Data:  vncServerST->sendAudioData(e.data.data(), e.data.size()); break;
+      case AudioEvent::End:   vncServerST->sendAudioEnd(); break;
+      }
+    }
+    t->repeat();
+  }
+#endif
 }

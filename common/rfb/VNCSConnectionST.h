@@ -85,6 +85,18 @@ namespace rfb {
     void announceClipboardOrClose(bool available);
     void sendClipboardDataOrClose(const char* data);
     void desktopReadyOrClose();
+    void writeAudioBeginOrClose();
+    void writeAudioDataOrClose(const uint8_t* data, size_t length);
+    void writeAudioEndOrClose();
+
+    // Whether this client has asked (via the TigerVNC-native audio
+    // extension's enable/disable control message) to receive audio --
+    // independent of client.supportsTigerAudio() (capability, static
+    // per connection) and of whether anything is actually available to
+    // send (a capture backend's own concern). A caller driving that
+    // backend checks this before bothering to call the OrClose writers
+    // above for this connection.
+    bool audioEnabled() const { return audioEnabled_; }
 
     // The following methods never throw exceptions
 
@@ -146,6 +158,7 @@ namespace rfb {
     void supportsFence() override;
     void supportsContinuousUpdates() override;
     void supportsLEDState() override;
+    void handleAudioControl(bool enable) override;
 
     // Timer callbacks
     void handleTimeout(core::Timer* t) override;
@@ -206,6 +219,8 @@ namespace rfb {
     time_t pointerEventTime;
     core::Point pointerEventPos;
     bool clientHasCursor;
+
+    bool audioEnabled_;
 
     std::string closeReason;
   };

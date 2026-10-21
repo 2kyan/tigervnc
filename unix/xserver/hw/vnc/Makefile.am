@@ -32,6 +32,17 @@ libvnccommon_la_SOURCES = $(HDRS) \
 libvnccommon_la_CPPFLAGS = $(AM_CPPFLAGS) \
 	-I$(TIGERVNC_SRCDIR)/unix/vncconfig
 
+# Deliberately not HAVE_AUDIO_CAPTURE: that one comes from the CMake
+# build's config.h (which XserverDesktop.cc also includes), so it would
+# disagree with --disable-vnc-audio here and leave XserverDesktop
+# referencing an AudioCapturePulse that was never compiled.
+if VNC_AUDIO
+libvnccommon_la_SOURCES += AudioCapturePulse.h AudioCapturePulse.cxx
+libvnccommon_la_CPPFLAGS += -DVNC_AUDIO_CAPTURE \
+	$(PULSE_CFLAGS) $(OPUS_CFLAGS)
+libvnccommon_la_LIBADD = $(PULSE_LIBS) $(OPUS_LIBS)
+endif
+
 bin_PROGRAMS = Xvnc
 
 man1_MANS = Xvnc.man

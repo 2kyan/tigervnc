@@ -74,6 +74,7 @@ namespace rfb {
     bool readVMwareLEDState();
 
     bool readQEMUServerMessage();
+    bool readAudioStreamMessage();
 
   private:
     CMsgHandler* handler;

@@ -57,6 +57,7 @@ namespace rfb {
     virtual void endOfContinuousUpdates() = 0;
     virtual void supportsQEMUKeyEvent() = 0;
     virtual void supportsQEMUAudio() = 0;
+    virtual void supportsTigerAudio() = 0;
     virtual void supportsExtendedMouseButtons() = 0;
     virtual void serverInit(int width, int height,
                             const PixelFormat& pf,

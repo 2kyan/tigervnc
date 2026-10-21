@@ -34,6 +34,7 @@
 #include <rfb/msgTypes.h>
 #include <rfb/fenceTypes.h>
 #include <rfb/qemuTypes.h>
+#include <rfb/audioTypes.h>
 #include <rfb/clipboardTypes.h>
 #include <rfb/PixelFormat.h>
 #include <rfb/ScreenSet.h>
@@ -352,6 +353,13 @@ void CMsgWriter::writeQEMUAudioSetFormat(uint8_t sampleFormat,
   os->writeU8(sampleFormat);
   os->writeU8(channels);
   os->writeU32(frequency);
+  endMsg();
+}
+
+void CMsgWriter::writeAudioControl(bool enable)
+{
+  startMsg(msgTypeAudioControl);
+  os->writeU8(enable ? audioControlEnable : audioControlDisable);
   endMsg();
 }
 

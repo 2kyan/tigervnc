@@ -32,6 +32,7 @@
 #include <rdr/ZlibOutStream.h>
 
 #include <rfb/msgTypes.h>
+#include <rfb/audioTypes.h>
 #include <rfb/fenceTypes.h>
 #include <rfb/clipboardTypes.h>
 #include <rfb/ClientParams.h>
@@ -52,7 +53,8 @@ SMsgWriter::SMsgWriter(ClientParams* client_, rdr::OutStream* os_)
     nRectsInUpdate(0), nRectsInHeader(0),
     needSetDesktopName(false), needCursor(false),
     needCursorPos(false), needLEDState(false),
-    needQEMUKeyEvent(false), needExtMouseButtonsEvent(false)
+    needQEMUKeyEvent(false), needExtMouseButtonsEvent(false),
+    needTigerAudioSupport(false)
 {
 }
 
@@ -237,6 +239,38 @@ void SMsgWriter::writeFence(uint32_t flags, unsigned len,
   endMsg();
 }
 
+void SMsgWriter::writeAudioBegin()
+{
+  if (!client->supportsEncoding(pseudoEncodingTigerAudio))
+    throw std::logic_error("Client does not support TigerVNC audio");
+
+  startMsg(msgTypeAudioStream);
+  os->writeU8(audioOpBegin);
+  endMsg();
+}
+
+void SMsgWriter::writeAudioData(const uint8_t* data, size_t length)
+{
+  if (!client->supportsEncoding(pseudoEncodingTigerAudio))
+    throw std::logic_error("Client does not support TigerVNC audio");
+
+  startMsg(msgTypeAudioStream);
+  os->writeU8(audioOpData);
+  os->writeU32((uint32_t)length);
+  os->writeBytes(data, length);
+  endMsg();
+}
+
+void SMsgWriter::writeAudioEnd()
+{
+  if (!client->supportsEncoding(pseudoEncodingTigerAudio))
+    throw std::logic_error("Client does not support TigerVNC audio");
+
+  startMsg(msgTypeAudioStream);
+  os->writeU8(audioOpEnd);
+  endMsg();
+}
+
 void SMsgWriter::writeEndOfContinuousUpdates()
 {
   if (!client->supportsEncoding(pseudoEncodingContinuousUpdates))
@@ -314,6 +348,14 @@ void SMsgWriter::writeExtendedMouseButtonsSupport()
   needExtMouseButtonsEvent = true;
 }
 
+void SMsgWriter::writeTigerAudioSupport()
+{
+  if (!client->supportsEncoding(pseudoEncodingTigerAudio))
+    throw std::logic_error("Client does not support TigerVNC audio");
+
+  needTigerAudioSupport = true;
+}
+
 bool SMsgWriter::needFakeUpdate()
 {
   if (needSetDesktopName)
@@ -327,6 +369,8 @@ bool SMsgWriter::needFakeUpdate()
   if (needQEMUKeyEvent)
     return true;
   if (needExtMouseButtonsEvent)
+    return true;
+  if (needTigerAudioSupport)
     return true;
   if (needNoDataUpdate())
     return true;
@@ -377,6 +421,8 @@ void SMsgWriter::writeFramebufferUpdateStart(int nRects)
     if (needQEMUKeyEvent)
       nRects++;
     if (needExtMouseButtonsEvent)
+      nRects++;
+    if (needTigerAudioSupport)
       nRects++;
   }
 
@@ -521,6 +567,11 @@ void SMsgWriter::writePseudoRects()
   if (needExtMouseButtonsEvent) {
     writeExtendedMouseButtonsRect();
     needExtMouseButtonsEvent = false;
+  }
+
+  if (needTigerAudioSupport) {
+    writeTigerAudioSupportRect();
+    needTigerAudioSupport = false;
   }
 }
 
@@ -753,6 +804,20 @@ void SMsgWriter::writeQEMUKeyEventRect()
   os->writeU16(0);
   os->writeU16(0);
   os->writeU32(pseudoEncodingQEMUKeyEvent);
+}
+
+void SMsgWriter::writeTigerAudioSupportRect()
+{
+  if (!client->supportsEncoding(pseudoEncodingTigerAudio))
+    throw std::logic_error("Client does not support TigerVNC audio");
+  if (++nRectsInUpdate > nRectsInHeader && nRectsInHeader)
+    throw std::logic_error("SMsgWriter::writeTigerAudioSupportRect: nRects out of sync");
+
+  os->writeS16(0);
+  os->writeS16(0);
+  os->writeU16(0);
+  os->writeU16(0);
+  os->writeU32(pseudoEncodingTigerAudio);
 }
 
 void SMsgWriter::writeExtendedMouseButtonsRect()

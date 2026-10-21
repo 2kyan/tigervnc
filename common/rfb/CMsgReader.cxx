@@ -35,6 +35,7 @@
 
 #include <rfb/msgTypes.h>
 #include <rfb/qemuTypes.h>
+#include <rfb/audioTypes.h>
 #include <rfb/clipboardTypes.h>
 #include <rfb/Exception.h>
 #include <rfb/CMsgHandler.h>
@@ -154,6 +155,52 @@ bool CMsgReader::readQEMUServerMessage()
   return true;
 }
 
+bool CMsgReader::readAudioStreamMessage()
+{
+  uint8_t op;
+  uint32_t length;
+
+  if (!is->hasData(1))
+    return false;
+
+  is->setRestorePoint();
+
+  op = is->readU8();
+
+  switch (op) {
+  case audioOpBegin:
+    is->clearRestorePoint();
+    handler->audioBegin();
+    return true;
+  case audioOpEnd:
+    is->clearRestorePoint();
+    handler->audioEnd();
+    return true;
+  case audioOpData:
+    break;
+  default:
+    throw protocol_error(core::format(_("Unknown audio stream operation %d"),
+                                      (int)op));
+  }
+
+  if (!is->hasDataOrRestore(4))
+    return false;
+
+  length = is->readU32();
+  if (length > maxAudioData)
+    throw protocol_error(_("Audio data is too large"));
+
+  if (!is->hasDataOrRestore(length))
+    return false;
+
+  is->clearRestorePoint();
+
+  handler->audioData(is->getptr(length), length);
+  is->setptr(length);
+
+  return true;
+}
+
 bool CMsgReader::readMsg()
 {
   if (state == MSGSTATE_IDLE) {
@@ -188,6 +235,9 @@ bool CMsgReader::readMsg()
       break;
     case msgTypeQEMUServerMessage:
       ret = readQEMUServerMessage();
+      break;
+    case msgTypeAudioStream:
+      ret = readAudioStreamMessage();
       break;
     default:
       throw protocol_error(
@@ -276,6 +326,10 @@ bool CMsgReader::readMsg()
       break;
     case pseudoEncodingQEMUAudio:
       handler->supportsQEMUAudio();
+      ret = true;
+      break;
+    case pseudoEncodingTigerAudio:
+      handler->supportsTigerAudio();
       ret = true;
       break;
     case pseudoEncodingExtendedMouseButtons:

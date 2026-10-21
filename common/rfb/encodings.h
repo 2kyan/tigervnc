@@ -45,6 +45,13 @@ namespace rfb {
   const int pseudoEncodingCursorWithAlpha = -314;
   const int pseudoEncodingQEMUKeyEvent = -258;
   const int pseudoEncodingQEMUAudio = -259;
+  // TigerVNC-native audio extension (see audioTypes.h) -- deliberately
+  // not -260 (the single slot squeezed between the two QEMU values
+  // above and pseudoEncodingLEDState below, which risks collision if
+  // that block ever grows); -262 is the first clean value in the free
+  // range that runs from here to pseudoEncodingDesktopName (-307).
+  // Next unused value in this run: -263.
+  const int pseudoEncodingTigerAudio = -262;
 
   // TightVNC-specific
   const int pseudoEncodingLastRect = -224;

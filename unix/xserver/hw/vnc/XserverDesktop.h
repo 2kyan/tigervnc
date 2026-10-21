@@ -27,7 +27,10 @@
 #include <dix-config.h>
 #endif
 
+#include <deque>
 #include <map>
+#include <mutex>
+#include <vector>
 
 #include <stdint.h>
 
@@ -39,6 +42,9 @@
 #include <unixcommon.h>
 
 #include "vncInput.h"
+#ifdef VNC_AUDIO_CAPTURE
+#include "AudioCapturePulse.h"
+#endif
 
 namespace rfb {
   class VNCServerST;
@@ -134,5 +140,30 @@ private:
   std::map<uint64_t, uint64_t> pendingMsc;
 
   core::Point oldCursorPos;
+
+#ifdef VNC_AUDIO_CAPTURE
+  // Remote audio (TigerVNC-native extension, see rfb/audioTypes.h).
+  // AudioCapturePulse's callbacks fire on PulseAudio's own mainloop
+  // thread; nothing in rfb::VNCServerST/SMsgWriter is thread-safe, so
+  // captured audio is handed off via a mutex-guarded queue and drained
+  // on audioTimer (core::Timer), the same pattern
+  // unix/x0vncserver/x0vncserver.cxx's AudioBridge uses -- audioTimer
+  // piggybacks on the existing queryConnectTimer-style handleTimeout()
+  // mechanism, which XserverDesktop already proves is integrated into
+  // the X server's own block/wakeup handler event loop (see
+  // blockHandler()'s core::Timer::checkTimeouts() call).
+  struct AudioEvent {
+    enum Kind { Begin, Data, End } kind;
+    std::vector<uint8_t> data;
+  };
+  void audioCaptureBegin();
+  void audioCaptureData(const uint8_t* pcm, size_t length);
+  void audioCaptureEnd();
+
+  AudioCapturePulse* audioCapture;
+  core::Timer audioTimer;
+  std::mutex audioMutex;
+  std::deque<AudioEvent> audioEvents;
+#endif
 };
 #endif

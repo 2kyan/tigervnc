@@ -257,3 +257,10 @@ bool ClientParams::supportsExtendedMouseButtons() const
     return true;
   return false;
 }
+
+bool ClientParams::supportsTigerAudio() const
+{
+  if (supportsEncoding(pseudoEncodingTigerAudio))
+    return true;
+  return false;
+}

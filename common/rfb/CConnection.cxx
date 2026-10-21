@@ -73,7 +73,8 @@ CConnection::CConnection()
   : csecurity(nullptr),
     supportsLocalCursor(false), supportsCursorPosition(false),
     supportsDesktopResize(false), supportsLEDState(false),
-    supportsAudio(false),
+    supportsAudio(false), supportsNativeAudio(false),
+    audioFormatIsNative(false),
     is(nullptr), os(nullptr), reader_(nullptr), writer_(nullptr),
     shared(false),
     state_(RFBSTATE_UNINITIALISED),
@@ -529,6 +530,11 @@ void CConnection::supportsQEMUAudio()
   server.supportsQEMUAudio = true;
 }
 
+void CConnection::supportsTigerAudio()
+{
+  server.supportsTigerAudio = true;
+}
+
 void CConnection::supportsExtendedMouseButtons()
 {
   server.supportsExtendedMouseButtons = true;
@@ -619,9 +625,33 @@ void CConnection::framebufferUpdateEnd()
 
   // The server tells us it can send audio by sending us a rectangle
   // with that pseudo encoding, so this is the earliest point at which
-  // we can safely ask for it
-  if (server.supportsQEMUAudio && supportsAudio && !audioRequested)
+  // we can safely ask for it. Prefer our own native extension over
+  // QEMU's -- a server could in principle advertise both, but only
+  // one request is ever sent per connection (audioRequested guards
+  // both paths).
+  if (server.supportsTigerAudio && supportsAudio && supportsNativeAudio &&
+      !audioRequested)
+    requestTigerAudio();
+  else if (server.supportsQEMUAudio && supportsAudio && !audioRequested)
     requestAudio();
+}
+
+void CConnection::requestTigerAudio()
+{
+  assert(!audioRequested);
+
+  // Only ask once, whatever the answer. A server that offered audio
+  // and then had it declined will not offer it again.
+  audioRequested = true;
+  audioFormatIsNative = true;
+
+  vlog.info(_("Requesting audio (format %d, %d channels, %d Hz)"),
+            (int)audioSampleFormat, (int)audioChannels,
+            (int)audioFrequency);
+
+  // v1 is a single fixed format -- see audioTypes.h -- so there is no
+  // format message to send, unlike the QEMU path below.
+  writer()->writeAudioControl(true);
 }
 
 void CConnection::requestAudio()
@@ -644,8 +674,10 @@ void CConnection::requestAudio()
 void CConnection::audioBegin()
 {
   // A server that never got a request for audio has no business
-  // sending any
-  if (!server.supportsQEMUAudio)
+  // sending any, on either the QEMU or the native extension path --
+  // both funnel into the same handleAudioBegin()/handleAudioEnd()/
+  // handleAudioData() surface (see audioTypes.h).
+  if (!server.supportsQEMUAudio && !server.supportsTigerAudio)
     throw protocol_error(_("Unexpected audio message"));
 
   handleAudioBegin();
@@ -653,7 +685,7 @@ void CConnection::audioBegin()
 
 void CConnection::audioEnd()
 {
-  if (!server.supportsQEMUAudio)
+  if (!server.supportsQEMUAudio && !server.supportsTigerAudio)
     throw protocol_error(_("Unexpected audio message"));
 
   handleAudioEnd();
@@ -661,7 +693,7 @@ void CConnection::audioEnd()
 
 void CConnection::audioData(const uint8_t* data, size_t length)
 {
-  if (!server.supportsQEMUAudio)
+  if (!server.supportsQEMUAudio && !server.supportsTigerAudio)
     throw protocol_error(_("Unexpected audio message"));
 
   handleAudioData(data, length);
@@ -1110,8 +1142,11 @@ void CConnection::updateEncodings()
     encodings.push_back(pseudoEncodingLEDState);
     encodings.push_back(pseudoEncodingVMwareLEDState);
   }
-  if (supportsAudio)
+  if (supportsAudio) {
+    if (supportsNativeAudio)
+      encodings.push_back(pseudoEncodingTigerAudio);
     encodings.push_back(pseudoEncodingQEMUAudio);
+  }
 
   encodings.push_back(pseudoEncodingDesktopName);
   encodings.push_back(pseudoEncodingLastRect);

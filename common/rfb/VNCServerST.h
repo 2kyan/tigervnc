@@ -24,6 +24,8 @@
 #ifndef __RFB_VNCSERVERST_H__
 #define __RFB_VNCSERVERST_H__
 
+#include <functional>
+
 #include <sys/time.h>
 
 #include <core/Timer.h>
@@ -118,6 +120,50 @@ namespace rfb {
     unsigned getLEDState() const { return ledState; }
     bool isDesktopReady() const { return desktopStarted; }
 
+    // Audio (TigerVNC-native extension, see audioTypes.h). Not part of
+    // the SDesktop-facing interface above -- called directly by
+    // whatever owns the real capture backend (e.g. x0vncserver's own
+    // audio integration code, which already holds a concrete
+    // VNCServerST reference). Broadcasts to every connected client
+    // that has both negotiated support and asked to receive audio
+    // (VNCSConnectionST::audioEnabled()), same pattern as bell()/
+    // setLEDState() broadcasting to every client unconditionally.
+    void sendAudioBegin();
+    void sendAudioData(const uint8_t* data, size_t length);
+    void sendAudioEnd();
+
+    // Whether a stream is currently active (i.e. between a
+    // sendAudioBegin() and the next sendAudioEnd()) -- lets a client
+    // that enables audio mid-stream (audioEnabled() flips true after
+    // the real sendAudioBegin() already broadcast to whoever was
+    // connected at the time) get an immediate synthesized begin of its
+    // own instead of only ever seeing data/end with no begin. See
+    // VNCSConnectionST::handleAudioControl().
+    bool isAudioStreaming() const { return audioStreaming; }
+
+    // Registers a hook for requestAudioRetry() below to call -- lets
+    // whatever owns the real capture backend (same platform code that
+    // calls sendAudioBegin/Data/End() above) give it a shot at
+    // reconnecting to the system's sound server on demand, e.g. from
+    // AudioCapturePulse::retryNow(). Optional: a server variant that
+    // never registers one just has no manual-retry trigger, independent
+    // of whatever automatic retry the capture backend does on its own.
+    void setAudioRetryCallback(std::function<void()> cb) {
+      audioRetryCallback = std::move(cb);
+    }
+
+    // Called when a client asks to enable audio (see
+    // VNCSConnectionST::handleAudioControl()) -- gives the registered
+    // callback above a chance to retry if the capture backend isn't
+    // currently available. Cheap/safe to call unconditionally, even
+    // while already connected and streaming fine -- the callback on the
+    // other end (e.g. AudioCapturePulse::retryNow()) is responsible for
+    // being a no-op in that case.
+    void requestAudioRetry() {
+      if (audioRetryCallback)
+        audioRetryCallback();
+    }
+
     // Event handlers
     void keyEvent(uint32_t keysym, uint32_t keycode, bool down);
     void pointerEvent(VNCSConnectionST* client,
@@ -184,6 +230,8 @@ namespace rfb {
     SDesktop* desktop;
     bool desktopStarted;
     bool desktopStarting;
+    bool audioStreaming;
+    std::function<void()> audioRetryCallback;
     int blockCounter;
     PixelBuffer* pb;
     ScreenSet screenLayout;
