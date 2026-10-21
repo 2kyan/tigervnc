@@ -29,19 +29,39 @@
 #endif
 
 #ifdef __APPLE__
+#include <TargetConditionals.h>
+#if TARGET_OS_OSX
 #include <Carbon/Carbon.h>
+#endif
 #endif
 
 #include <core/i18n.h>
 
 // Restore original functions
-
 #undef dgettext
 #undef dcgettext
 #undef dngettext
 #undef dcngettext
 #undef pgettext_aux
 #undef npgettext_aux
+
+// When NLS is disabled there's no libintl to fall back to (this matters
+// on platforms like iOS/Android that don't ship dgettext() et al. at all),
+// so re-create gettext.h's own no-NLS passthrough semantics here. This
+// mirrors gettext.h verbatim; we can't just rely on its macros because
+// the #undef above -- needed to peel back core/i18n.h's redirection of
+// these names to *_rfb -- also strips gettext.h's fallback definitions.
+#if !defined ENABLE_NLS || !ENABLE_NLS
+#define dgettext(Domainname, Msgid) ((void) (Domainname), (const char *) (Msgid))
+#define dcgettext(Domainname, Msgid, Category) \
+  ((void) (Category), dgettext (Domainname, Msgid))
+#define dngettext(Domainname, Msgid1, Msgid2, N) \
+  ((void) (Domainname), \
+   (N) == 1 ? ((void) (Msgid2), (const char *) (Msgid1)) \
+            : ((void) (Msgid1), (const char *) (Msgid2)))
+#define dcngettext(Domainname, Msgid1, Msgid2, N, Category) \
+  ((void) (Category), dngettext (Domainname, Msgid1, Msgid2, N))
+#endif
 
 static bool initialized = false;
 
@@ -65,7 +85,7 @@ static const char* getlocaledir()
   strcat(localebuf, "\\locale");
 
   return localebuf;
-#elif defined(__APPLE__)
+#elif defined(__APPLE__) && TARGET_OS_OSX
   CFBundleRef bundle;
   CFURLRef localeurl;
   CFStringRef localestr;
@@ -92,6 +112,15 @@ static const char* getlocaledir()
     return nullptr;
 
   return localebuf;
+#elif defined(__APPLE__) && !TARGET_OS_OSX
+  // No bundle resource lookup (CFBundle) or gettext .mo catalogs on
+  // iOS/tvOS -- the mobile app UIs use their own native localization.
+  return nullptr;
+#elif defined(__ANDROID__)
+  // Same as iOS/tvOS above: no filesystem-installed locale directory or
+  // gettext .mo catalogs on Android -- the app UI uses its own native
+  // localization (Android string resources).
+  return nullptr;
 #else
   return CMAKE_INSTALL_FULL_LOCALEDIR;
 #endif
