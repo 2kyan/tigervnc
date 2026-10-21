@@ -5,8 +5,13 @@ portable protocol core (`common/{core,network,rdr,rfb}` in this tree)
 behind new, touch-first UIs, rather than porting TigerVNC's FLTK desktop
 UI.
 
+On this branch the apps also play remote audio through the
+TigerVNC-native audio extension (Opus; see `../AUDIO.md` for the server
+side).
+
 See [DESIGN.md](DESIGN.md) for architecture, phased roadmap, findings
-and open decisions.
+and open decisions, and [../BUILD.md](../BUILD.md) for building
+everything in this tree (desktop viewer, servers, Android, iOS).
 
 ## Layout
 
@@ -28,7 +33,8 @@ them from the root. Other paths below are relative to `mobile/`.
 ### Android
 
 Needs the Android SDK and NDK (`ANDROID_NDK_HOME` is detected from
-`ANDROID_SDK_ROOT`/`ANDROID_HOME` if unset), a JDK, and meson + ninja.
+`ANDROID_SDK_ROOT`/`ANDROID_HOME` if unset), a JDK, and meson + ninja. libopus is cross-compiled along with the other
+dependencies.
 
 ```sh
 scripts/build-android.sh            # debug APK
@@ -52,8 +58,10 @@ scripts/build-ios.sh --device   # device build (needs DEVELOPMENT_TEAM in projec
 ### Host build and smoke test
 
 `core/` also builds on the host, with a smoke test against a
-libvncserver-based test server (needs `libvncserver-dev`, plus the
-GnuTLS, Nettle, Pixman, libjpeg and zlib development packages):
+libvncserver-based test server, including an Opus audio round trip
+(needs `libvncserver-dev` and `libopus-dev`, plus the GnuTLS, Nettle,
+Pixman, libjpeg and zlib development packages; `scripts/install-deps.sh`
+installs them all):
 
 ```sh
 cmake -S core -B core/build/host -DTIGERVNC_CORE_BUILD_TESTS=ON

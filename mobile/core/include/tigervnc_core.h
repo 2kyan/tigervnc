@@ -99,6 +99,22 @@ typedef struct {
    * failure/unsupported reason to the user instead of silently doing
    * nothing. */
   void (*resize_result)(void* context, VncResizeResult result);
+
+  /* Remote audio. Only fires if the server advertises support for the
+   * TigerVNC-native audio extension (or, as a fallback, QEMU's own VNC
+   * audio extension) -- most servers advertise neither, in which case
+   * these three never fire at all and nothing else changes. There may
+   * be many begin/end pairs in a single session, as the server only
+   * sends audio while something is actually playing. Format is always
+   * fixed: 16-bit signed little-endian PCM, 2 channels (interleaved),
+   * 48000 Hz -- there is no per-connection negotiation in this version. */
+  void (*audio_begin)(void* context);
+  void (*audio_end)(void* context);
+
+  /* `pcm` points at `length` bytes of raw audio, in the fixed format
+   * documented above. Valid only for the duration of this call; copy
+   * it if you need it afterward (same contract as frame_update). */
+  void (*audio_data)(void* context, const uint8_t* pcm, size_t length);
 } VncClientCallbacks;
 
 typedef struct {
@@ -166,6 +182,18 @@ void vnc_client_request_refresh(VncClient* client);
  * your own debouncing, though avoiding a flood of calls during e.g. a
  * live window drag is still courteous to the server. */
 void vnc_client_request_resize(VncClient* client, int width, int height);
+
+/* Enables or disables remote audio (see audio_begin/audio_end/audio_data
+ * above). Enabled by default once a connection completes -- this is only
+ * needed to mute/unmute. A no-op (never sent over the wire) if the
+ * server's audio support isn't known to be present yet at the moment
+ * this is acted on (same "resolves against current state" semantics as
+ * vnc_client_request_resize() -- safe to call at any time, coalesces to
+ * only the latest requested state, but a call made before the server's
+ * support is confirmed can resolve as a no-op rather than being
+ * retried once support is learned; intended for toggling mid-session,
+ * e.g. from a mute button, not for pre-connect configuration). */
+void vnc_client_set_audio_enabled(VncClient* client, int enabled);
 
 #ifdef __cplusplus
 }

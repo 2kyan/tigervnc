@@ -77,4 +77,9 @@ void vnc_client_request_resize(VncClient* client, int width, int height)
   impl(client)->requestResize(width, height);
 }
 
+void vnc_client_set_audio_enabled(VncClient* client, int enabled)
+{
+  impl(client)->setAudioEnabled(enabled != 0);
+}
+
 } // extern "C"

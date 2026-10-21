@@ -8,6 +8,8 @@
 #include <thread>
 #include <vector>
 
+#include <opus/opus.h>
+
 #include <rfb/CConnection.h>
 
 #include "tigervnc_core.h"
@@ -34,6 +36,7 @@ public:
   void requestClipboard();
   void requestRefresh();
   void requestResize(int width, int height);
+  void setAudioEnabled(bool enabled);
 
 protected:
   // rfb::CConnection / rfb::CMsgHandler overrides.
@@ -51,6 +54,9 @@ protected:
   void handleClipboardData(const char* data) override;
   void handleClipboardAnnounce(bool available) override;
   void bell() override;
+  void handleAudioBegin() override;
+  void handleAudioEnd() override;
+  void handleAudioData(const uint8_t* data, size_t length) override;
 
 private:
   void runThread(std::string host, int port, bool shared);
@@ -64,12 +70,26 @@ private:
   // multi-monitor/fullscreen concept to worry about.
   void sendResizeRequest(int width, int height);
 
+  // Sends the actual audio enable/disable control message; must run on
+  // the worker thread, same reasoning as sendResizeRequest() above.
+  void sendAudioControl(bool enable);
+
   // Blocks the worker thread until either a decision is provided via
   // provideCredentials()/verifyResponse(), or disconnect() cancels it.
   // Returns false if cancelled.
   bool waitForDecision(std::unique_lock<std::mutex>& lock);
 
   VncClientCallbacks callbacks_;
+
+  // Decodes audio_data's Opus-encoded payload back to the fixed PCM
+  // format documented in tigervnc_core.h before invoking
+  // callbacks_.audio_data() -- Opus is purely a wire-format detail; the
+  // C ABI (and every platform consumer) only ever sees decoded PCM, same
+  // contract as before Opus was introduced. Created lazily, on first
+  // use, from handleAudioData(); persists for the connection's lifetime
+  // rather than being recreated per audioBegin()/audioEnd() pair, since
+  // those just mark periods of silence within one logical stream.
+  OpusDecoder* opusDecoder_ = nullptr;
 
   std::thread thread_;
   std::atomic<bool> cancelled_{false};
@@ -104,6 +124,12 @@ private:
   bool wantResize_ = false;
   int resizeWidth_ = 0;
   int resizeHeight_ = 0;
+
+  // Only the latest requested mute/unmute state matters, same
+  // coalescing reasoning as wantResize_ above. Defaults to wanting
+  // audio enabled, matching supportsAudio's default-on stance.
+  bool wantAudioEnabledChange_ = false;
+  bool audioEnabledTarget_ = true;
 };
 
 } // namespace tigervnc_core

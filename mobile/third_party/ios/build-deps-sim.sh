@@ -30,6 +30,7 @@ GMP_VER=6.3.0
 TASN1_VER=4.20.0
 NETTLE_VER=3.10.1
 GNUTLS_VER=3.8.9
+OPUS_VER=1.5.2
 
 # Reuse the device build's already-downloaded tarballs if present.
 DEVICE_SRC="$ROOT_DIR/src"
@@ -51,6 +52,7 @@ fetch "gmp-$GMP_VER.tar.xz" "https://ftp.gnu.org/gnu/gmp/gmp-$GMP_VER.tar.xz"
 fetch "libtasn1-$TASN1_VER.tar.gz" "https://ftp.gnu.org/gnu/libtasn1/libtasn1-$TASN1_VER.tar.gz"
 fetch "nettle-$NETTLE_VER.tar.gz" "https://ftp.gnu.org/gnu/nettle/nettle-$NETTLE_VER.tar.gz"
 fetch "gnutls-$GNUTLS_VER.tar.xz" "https://www.gnupg.org/ftp/gcrypt/gnutls/v3.8/gnutls-$GNUTLS_VER.tar.xz"
+fetch "opus-$OPUS_VER.tar.gz" "https://github.com/xiph/opus/releases/download/v$OPUS_VER/opus-$OPUS_VER.tar.gz"
 
 for f in "$SRC_DIR"/*.tar.gz "$SRC_DIR"/*.tar.xz; do
   d="${f%.tar.*}"
@@ -131,6 +133,19 @@ if [ ! -f "$SYSROOT/lib/libgnutls.a" ]; then
       LIBTASN1_CFLAGS="-I$SYSROOT/include" LIBTASN1_LIBS="-L$SYSROOT/lib -ltasn1" \
       ZLIB_CFLAGS="" ZLIB_LIBS="-lz" && \
     make -j"$(sysctl -n hw.ncpu)" && make install)
+fi
+
+# --- opus (cmake) -------------------------------------------------------
+if [ ! -f "$SYSROOT/lib/libopus.a" ]; then
+  echo "==> building opus"
+  cmake -S "$SRC_DIR/opus-$OPUS_VER" -B "$BUILD_DIR/opus" -G Ninja \
+    -DCMAKE_TOOLCHAIN_FILE="$ROOT_DIR/ios-arm64-sim.toolchain.cmake" \
+    -DCMAKE_INSTALL_PREFIX="$SYSROOT" \
+    -DOPUS_BUILD_SHARED_LIBRARY=OFF -DOPUS_BUILD_TESTING=OFF \
+    -DOPUS_BUILD_PROGRAMS=OFF \
+    -DCMAKE_BUILD_TYPE=Release
+  cmake --build "$BUILD_DIR/opus"
+  cmake --install "$BUILD_DIR/opus"
 fi
 
 echo "==> done. iOS Simulator (arm64) dependencies installed under $SYSROOT"

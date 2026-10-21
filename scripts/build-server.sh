@@ -45,8 +45,18 @@ fi
 cmake_configure "$BUILD_DIR" -DBUILD_VIEWER=OFF
 cmake_build "$BUILD_DIR"
 
+install_cmake_bins()
+{
+  [ "$INSTALL_BIN" = "1" ] && log "copied to $BIN_DIR:"
+  install_bin "$BUILD_DIR/unix/x0vncserver/x0vncserver" x0tigervncserver
+  install_bin "$BUILD_DIR/unix/w0vncserver/w0vncserver" w0tigervncserver
+  install_bin "$BUILD_DIR/unix/w0vncserver/w0vncserver-forget" w0tigervncserver-forget
+  install_bin "$BUILD_DIR/unix/vncpasswd/vncpasswd" tigervncpasswd
+}
+
 if [ "$SKIP_XVNC" = "1" ]; then
   log "skipping Xvnc (SKIP_XVNC=1)"
+  install_cmake_bins
   exit 0
 fi
 
@@ -132,4 +142,9 @@ for f in unix/x0vncserver/x0vncserver unix/w0vncserver/w0vncserver \
          unix/vncserver/vncserver unix/xserver/hw/vnc/Xvnc; do
   [ -e "$BUILD_DIR/$f" ] && echo "    $BUILD_DIR/$f"
 done
+
+install_cmake_bins
+install_bin "$XSERVER_DIR/hw/vnc/Xvnc" Xtigervnc
+install_bin "$XSERVER_DIR/hw/vnc/.libs/libvnc.so" libvnc.so 0644
+
 echo "    try: $XSERVER_DIR/hw/vnc/Xvnc :99 -SecurityTypes None -localhost"

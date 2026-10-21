@@ -2,11 +2,21 @@ package com.tigervnc.mobile.viewer
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.media.AudioAttributes
+import android.media.AudioFormat
+import android.media.AudioTrack
 import android.os.Handler
 import android.os.Looper
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
+import java.util.concurrent.LinkedBlockingQueue
+
+/** Sentinels pushed onto VncBridge's audio queue alongside PCM ByteArray
+ * chunks -- see the class doc comment on the queue field itself. */
+private object AudioBeginMarker
+private object AudioEndMarker
+private object AudioStopMarker
 
 /** Kotlin state mirroring tigervnc_core.h's VncState. */
 enum class VncConnState { CONNECTING, CONNECTED, DISCONNECTED, ERROR }
@@ -67,6 +77,103 @@ class VncBridge(context: Context) {
         private set
     var lastPort by mutableStateOf(prefs.getInt(KEY_LAST_PORT, 5900))
         private set
+    /** UI-facing mute state (drives a button icon in SessionScreen). Only
+     * fine to be Compose state because nothing performance-sensitive
+     * reads it -- the actual audio path below never touches it directly,
+     * reading [audioMutedFlag] instead (see that field's own comment). */
+    var audioMuted by mutableStateOf(false)
+        private set
+
+    /** Remote audio: server->client PCM chunks arrive on tigervnc_core's
+     * background thread (via onAudioBegin/onAudioEnd/onAudioData below)
+     * as a real stream that must be queued and played in order -- unlike
+     * frame_update's single most-recent-frame semantics, dropping or
+     * reordering audio is audible. A dedicated [audioThread] drains this
+     * queue into an [AudioTrack] in MODE_STREAM, entirely independent of
+     * Compose's main-thread state (`mainHandler.post`) used everywhere
+     * else in this class. Bounded so a stalled/slow consumer can't grow
+     * memory unboundedly; onAudioData must never block (it runs on
+     * tigervnc_core's worker thread), so overflow drops the oldest
+     * chunk instead. */
+    private val audioQueue = LinkedBlockingQueue<Any>(64)
+    private var audioThread: Thread? = null
+    /** Belt-and-suspenders local mute, checked on the playback thread
+     * itself -- independent of [audioMuted] (UI state) and of the
+     * server-facing enable/disable wire message nativeSetAudioEnabled
+     * sends. Volatile: written from the UI-triggered setter, read from
+     * audioThread. */
+    @Volatile
+    private var audioMutedFlag = false
+
+    private fun offerAudioQueueItem(item: Any) {
+        if (!audioQueue.offer(item)) {
+            audioQueue.poll()
+            audioQueue.offer(item)
+        }
+    }
+
+    private fun startAudioThread() {
+        audioThread = Thread {
+            var track: AudioTrack? = null
+            loop@ while (true) {
+                when (val item = audioQueue.take()) {
+                    AudioStopMarker -> break@loop
+                    AudioBeginMarker -> {
+                        if (track == null) {
+                            track = AudioTrack.Builder()
+                                .setAudioAttributes(
+                                    AudioAttributes.Builder()
+                                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                                        .build()
+                                )
+                                .setAudioFormat(
+                                    AudioFormat.Builder()
+                                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                                        .setSampleRate(48000)
+                                        .setChannelMask(AudioFormat.CHANNEL_OUT_STEREO)
+                                        .build()
+                                )
+                                .setTransferMode(AudioTrack.MODE_STREAM)
+                                .build()
+                        }
+                        track.play()
+                    }
+                    AudioEndMarker -> {
+                        // Leave the track allocated and playing, just idle
+                        // (no more writes until the next begin) -- the
+                        // server may resume shortly, and there may be
+                        // many such periods in one session (see
+                        // tigervnc_core.h's audio_begin/audio_end doc).
+                    }
+                    is ByteArray -> {
+                        if (!audioMutedFlag) {
+                            track?.write(item, 0, item.size, AudioTrack.WRITE_BLOCKING)
+                        }
+                    }
+                }
+            }
+            track?.stop()
+            track?.release()
+        }.also { it.start() }
+    }
+
+    private fun stopAudioThread() {
+        offerAudioQueueItem(AudioStopMarker)
+        audioThread?.join()
+        audioThread = null
+        audioQueue.clear()
+    }
+
+    /** Mutes/unmutes remote audio: flips the local playback mute (belt-
+     * and-suspenders, takes effect immediately even if the server never
+     * answers) and asks the server to stop/resume sending, via the same
+     * TigerVNC-native audio extension negotiated on connect. */
+    fun updateAudioMuted(muted: Boolean) {
+        audioMuted = muted
+        audioMutedFlag = muted
+        nativeSetAudioEnabled(nativeHandle, !muted)
+    }
 
     fun updateUseReadableResize(value: Boolean) {
         useReadableResize = value
@@ -97,10 +204,15 @@ class VncBridge(context: Context) {
         nativeDestroy(nativeHandle)
         nativeHandle = nativeCreate()
 
+        audioMutedFlag = audioMuted
+        startAudioThread()
         nativeConnect(nativeHandle, host, port, shared)
     }
 
-    fun disconnect() = nativeDisconnect(nativeHandle)
+    fun disconnect() {
+        nativeDisconnect(nativeHandle)
+        stopAudioThread()
+    }
 
     fun provideCredentials(username: String?, password: String) {
         credentialsNeeded = false
@@ -140,6 +252,7 @@ class VncBridge(context: Context) {
             nativeDestroy(nativeHandle)
             nativeHandle = 0
         }
+        if (audioThread != null) stopAudioThread()
     }
 
     // --- Called from native code (VncBridge.cpp) on tigervnc_core's background thread ---
@@ -182,6 +295,12 @@ class VncBridge(context: Context) {
         }
     }
 
+    private fun onAudioBegin() = offerAudioQueueItem(AudioBeginMarker)
+
+    private fun onAudioEnd() = offerAudioQueueItem(AudioEndMarker)
+
+    private fun onAudioData(pcm: ByteArray) = offerAudioQueueItem(pcm)
+
     private fun onLog(level: Int, message: String) {
         android.util.Log.println(
             when (level) {
@@ -208,6 +327,7 @@ class VncBridge(context: Context) {
     private external fun nativeRequestClipboard(handle: Long)
     private external fun nativeRequestRefresh(handle: Long)
     private external fun nativeRequestResize(handle: Long, width: Int, height: Int)
+    private external fun nativeSetAudioEnabled(handle: Long, enabled: Boolean)
 
     companion object {
         private const val KEY_USE_READABLE_RESIZE = "use_readable_resize"

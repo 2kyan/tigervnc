@@ -5,6 +5,9 @@
 #   ENABLE_AUDIO  AUTO, ON or OFF; see AUDIO.md     (default: AUTO)
 #   JOBS          parallel build jobs               (default: nproc)
 #   CMAKE_ARGS    extra arguments passed to cmake
+#   BIN_DIR       where built binaries are copied, under the names
+#                 TigerVNC's Debian packages use    (default: <root>/bin)
+#   INSTALL_BIN   set to 0 to skip copying to BIN_DIR
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -12,6 +15,8 @@ BUILD_TYPE="${BUILD_TYPE:-Release}"
 ENABLE_AUDIO="${ENABLE_AUDIO:-AUTO}"
 JOBS="${JOBS:-$(nproc 2>/dev/null || echo 4)}"
 CMAKE_ARGS="${CMAKE_ARGS:-}"
+BIN_DIR="${BIN_DIR:-$ROOT_DIR/bin}"
+INSTALL_BIN="${INSTALL_BIN:-1}"
 
 log()
 {
@@ -88,4 +93,20 @@ cmake_build()
     log "building $target"
     cmake --build "$dir" -j "$JOBS" --target "$target"
   done
+}
+
+# install_bin <source> <name> [mode]
+#
+# Copies a built file into BIN_DIR. Executables get the names TigerVNC's
+# Debian packaging uses (contrib/packages/deb/*/debian/rules), so they
+# can't be mistaken for a distribution's /usr/bin/x0vncserver and such.
+# Missing sources are skipped (e.g. w0vncserver without Wayland).
+install_bin()
+{
+  local src="$1" name="$2" mode="${3:-0755}"
+  [ "$INSTALL_BIN" = "1" ] || return 0
+  [ -e "$src" ] || return 0
+  mkdir -p "$BIN_DIR"
+  install -m "$mode" "$src" "$BIN_DIR/$name"
+  echo "    $BIN_DIR/$name"
 }

@@ -161,6 +161,22 @@ fun SessionScreen(bridge: VncBridge) {
             }
 
             Surface(
+                onClick = { bridge.updateAudioMuted(!bridge.audioMuted) },
+                shape = MaterialTheme.shapes.small,
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
+                modifier = Modifier.size(40.dp),
+            ) {
+                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                    // No icon font wired up here yet -- plain glyphs match
+                    // the "Aa"/"1:1" resize-mode toggle right next to it.
+                    Text(
+                        if (bridge.audioMuted) "Mu" else "Au",
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                }
+            }
+
+            Surface(
                 onClick = { bridge.disconnect() },
                 shape = MaterialTheme.shapes.small,
                 color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),

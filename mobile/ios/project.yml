@@ -14,7 +14,8 @@ settings:
     CLANG_CXX_LIBRARY: libc++
     OTHER_LDFLAGS: >-
       -lc++ -ltigervnc_core -lrfbclient -lrfb -lrdr -lnetwork -lcore
-      -lgnutls -lhogweed -lnettle -lgmp -ltasn1 -lpixman-1 -ljpeg -lz
+      -lgnutls -lhogweed -lnettle -lgmp -ltasn1 -lpixman-1 -ljpeg -lopus -lz
+      -framework AVFoundation
     # Prebuilt static libs live in two trees (device vs Simulator SDK --
     # same arm64 architecture, different platform, can't be lipo'd
     # together). See third_party/ios/build-deps.sh /

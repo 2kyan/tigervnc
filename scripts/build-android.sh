@@ -1,6 +1,7 @@
 #!/bin/bash
 # Builds the Android app (mobile/android) end to end: cross-compiles
-# mobile/third_party/android's dependencies, builds the mobile/core C ABI
+# mobile/third_party/android's dependencies (including libopus for the
+# audio extension, see AUDIO.md), builds the mobile/core C ABI
 # wrapper (tigervnc_core) for arm64-v8a against them, then assembles the
 # APK via Gradle (which links the JNI module,
 # mobile/android/app/src/main/cpp/CMakeLists.txt, against the prebuilt
@@ -41,7 +42,7 @@ if [ -z "$ANDROID_NDK_HOME" ] || [ ! -d "$ANDROID_NDK_HOME" ]; then
   exit 1
 fi
 
-echo "==> 1/3: cross-compiling mobile/third_party/android dependencies"
+echo "==> 1/3: cross-compiling mobile/third_party/android dependencies (incl. libopus)"
 "$THIRD_PARTY_DIR/build-deps.sh"
 
 echo "==> 2/3: building mobile/core (tigervnc_core) for Android arm64-v8a"

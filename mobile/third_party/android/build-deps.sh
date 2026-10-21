@@ -1,9 +1,11 @@
 #!/bin/bash
-# Cross-compiles pixman, libjpeg-turbo, gmp, libtasn1, nettle, and gnutls
-# for Android (arm64-v8a, API 24+) from source, installing them into
-# ./sysroot. These are the non-NDK-sysroot dependencies of
-# TigerVNC's common/{core,rdr,network,rfb}. zlib is not vendored --
-# the NDK sysroot ships it (as a shared system lib, libz.so).
+# Cross-compiles pixman, libjpeg-turbo, gmp, libtasn1, nettle, gnutls, and
+# libopus for Android (arm64-v8a, API 24+) from source, installing them
+# into ./sysroot. These are the non-NDK-sysroot dependencies of
+# TigerVNC's common/{core,rdr,network,rfb} (libopus specifically for
+# core/src/VncClientImpl.cxx's Opus decode -- see rfb/audioTypes.h and
+# DESIGN.md's "Opus audio compression" notes for why). zlib is not
+# vendored -- the NDK sysroot ships it (as a shared system lib, libz.so).
 #
 # Mirrors third_party/ios/build-deps.sh -- see it for background on why
 # each dependency is needed and why gnutls/nettle aren't optional.
@@ -67,6 +69,7 @@ GMP_VER=6.3.0
 TASN1_VER=4.20.0
 NETTLE_VER=3.10.1
 GNUTLS_VER=3.8.9
+OPUS_VER=1.5.2
 
 fetch() {
   local name="$1" url="$2"
@@ -81,6 +84,7 @@ fetch "gmp-$GMP_VER.tar.xz" "https://ftp.gnu.org/gnu/gmp/gmp-$GMP_VER.tar.xz"
 fetch "libtasn1-$TASN1_VER.tar.gz" "https://ftp.gnu.org/gnu/libtasn1/libtasn1-$TASN1_VER.tar.gz"
 fetch "nettle-$NETTLE_VER.tar.gz" "https://ftp.gnu.org/gnu/nettle/nettle-$NETTLE_VER.tar.gz"
 fetch "gnutls-$GNUTLS_VER.tar.xz" "https://www.gnupg.org/ftp/gcrypt/gnutls/v3.8/gnutls-$GNUTLS_VER.tar.xz"
+fetch "opus-$OPUS_VER.tar.gz" "https://github.com/xiph/opus/releases/download/v$OPUS_VER/opus-$OPUS_VER.tar.gz"
 
 for f in "$SRC_DIR"/*.tar.gz "$SRC_DIR"/*.tar.xz; do
   d="${f%.tar.*}"
@@ -167,6 +171,19 @@ if [ ! -f "$SYSROOT/lib/libgnutls.a" ]; then
       LIBTASN1_CFLAGS="-I$SYSROOT/include" LIBTASN1_LIBS="-L$SYSROOT/lib -ltasn1" \
       ZLIB_CFLAGS="" ZLIB_LIBS="-lz" && \
     make -j"$NPROC" && make install)
+fi
+
+# --- opus (cmake) -------------------------------------------------------
+if [ ! -f "$SYSROOT/lib/libopus.a" ]; then
+  echo "==> building opus"
+  cmake -S "$SRC_DIR/opus-$OPUS_VER" -B "$BUILD_DIR/opus" -G Ninja \
+    -DCMAKE_TOOLCHAIN_FILE="$ROOT_DIR/android-arm64.toolchain.cmake" \
+    -DCMAKE_INSTALL_PREFIX="$SYSROOT" \
+    -DOPUS_BUILD_SHARED_LIBRARY=OFF -DOPUS_BUILD_TESTING=OFF \
+    -DOPUS_BUILD_PROGRAMS=OFF \
+    -DCMAKE_BUILD_TYPE=Release
+  cmake --build "$BUILD_DIR/opus"
+  cmake --install "$BUILD_DIR/opus"
 fi
 
 echo "==> done. Android arm64-v8a dependencies installed under $SYSROOT"

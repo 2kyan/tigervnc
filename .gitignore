@@ -13,3 +13,6 @@ config.h
 cmake_install.cmake
 cmake_uninstall.cmake
 install_manifest.txt
+
+# scripts/build-*.sh copy their binaries here
+/bin/

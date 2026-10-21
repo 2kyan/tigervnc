@@ -24,6 +24,9 @@ struct BridgeContext {
   jmethodID onClipboardText = nullptr;
   jmethodID onLog = nullptr;
   jmethodID onResizeResult = nullptr;
+  jmethodID onAudioBegin = nullptr;
+  jmethodID onAudioEnd = nullptr;
+  jmethodID onAudioData = nullptr;
 };
 
 // Attaches the calling native thread to the JVM for the duration of one
@@ -132,6 +135,33 @@ void OnResizeResult(void* context, VncResizeResult result) {
   env.get()->CallVoidMethod(ctx->bridge, ctx->onResizeResult, static_cast<jint>(result));
 }
 
+void OnAudioBegin(void* context) {
+  auto* ctx = static_cast<BridgeContext*>(context);
+  ScopedEnv env(ctx->jvm);
+  if (!env.get()) return;
+  env.get()->CallVoidMethod(ctx->bridge, ctx->onAudioBegin);
+}
+
+void OnAudioEnd(void* context) {
+  auto* ctx = static_cast<BridgeContext*>(context);
+  ScopedEnv env(ctx->jvm);
+  if (!env.get()) return;
+  env.get()->CallVoidMethod(ctx->bridge, ctx->onAudioEnd);
+}
+
+void OnAudioData(void* context, const uint8_t* pcm, size_t length) {
+  auto* ctx = static_cast<BridgeContext*>(context);
+  ScopedEnv env(ctx->jvm);
+  if (!env.get()) return;
+  // Copy into a JVM-owned byte array now -- pcm is only valid for the
+  // duration of this call (see tigervnc_core.h's audio_data contract).
+  jbyteArray array = env.get()->NewByteArray(static_cast<jsize>(length));
+  env.get()->SetByteArrayRegion(array, 0, static_cast<jsize>(length),
+                                 reinterpret_cast<const jbyte*>(pcm));
+  env.get()->CallVoidMethod(ctx->bridge, ctx->onAudioData, array);
+  env.get()->DeleteLocalRef(array);
+}
+
 }  // namespace
 
 extern "C" {
@@ -152,6 +182,9 @@ Java_com_tigervnc_mobile_viewer_VncBridge_nativeCreate(JNIEnv* env, jobject thiz
   ctx->onClipboardText = env->GetMethodID(ctx->bridgeClass, "onClipboardText", "(Ljava/lang/String;)V");
   ctx->onLog = env->GetMethodID(ctx->bridgeClass, "onLog", "(ILjava/lang/String;)V");
   ctx->onResizeResult = env->GetMethodID(ctx->bridgeClass, "onResizeResult", "(I)V");
+  ctx->onAudioBegin = env->GetMethodID(ctx->bridgeClass, "onAudioBegin", "()V");
+  ctx->onAudioEnd = env->GetMethodID(ctx->bridgeClass, "onAudioEnd", "()V");
+  ctx->onAudioData = env->GetMethodID(ctx->bridgeClass, "onAudioData", "([B)V");
 
   VncClientCallbacks callbacks{};
   callbacks.context = ctx;
@@ -162,6 +195,9 @@ Java_com_tigervnc_mobile_viewer_VncBridge_nativeCreate(JNIEnv* env, jobject thiz
   callbacks.clipboard_text = OnClipboardText;
   callbacks.log = OnLog;
   callbacks.resize_result = OnResizeResult;
+  callbacks.audio_begin = OnAudioBegin;
+  callbacks.audio_end = OnAudioEnd;
+  callbacks.audio_data = OnAudioData;
 
   VncClient* client = vnc_client_create(&callbacks);
   // BridgeContext outlives the VncClient (freed alongside it below) --
@@ -258,6 +294,13 @@ Java_com_tigervnc_mobile_viewer_VncBridge_nativeRequestResize(JNIEnv* /*env*/, j
                                                                  jint width, jint height) {
   auto* pair = reinterpret_cast<std::pair<VncClient*, BridgeContext*>*>(handle);
   vnc_client_request_resize(pair->first, width, height);
+}
+
+JNIEXPORT void JNICALL
+Java_com_tigervnc_mobile_viewer_VncBridge_nativeSetAudioEnabled(JNIEnv* /*env*/, jobject /*thiz*/, jlong handle,
+                                                                   jboolean enabled) {
+  auto* pair = reinterpret_cast<std::pair<VncClient*, BridgeContext*>*>(handle);
+  vnc_client_set_audio_enabled(pair->first, enabled ? 1 : 0);
 }
 
 }  // extern "C"

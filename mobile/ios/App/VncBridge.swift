@@ -1,3 +1,4 @@
+import AVFoundation
 import Combine
 import CoreGraphics
 import Foundation
@@ -49,8 +50,11 @@ final class VncBridge: ObservableObject {
     }() {
         didSet { UserDefaults.standard.set(Int(lastPort), forKey: "lastPort") }
     }
+    /// UI-facing mute state (drives a button icon in SessionView).
+    @Published private(set) var audioMuted: Bool = false
 
     private var client: OpaquePointer?
+    private let audioPlayer = AudioPlayer()
 
     func connect(host: String, port: Int32, shared: Bool = true) {
         disconnect()
@@ -105,6 +109,31 @@ final class VncBridge: ObservableObject {
             let bridge = Unmanaged<VncBridge>.fromOpaque(context).takeUnretainedValue()
             DispatchQueue.main.async { bridge.resizeUnsupported = true }
         }
+        // Audio callbacks deliberately do NOT hop to DispatchQueue.main --
+        // that pattern above is reserved for @Published UI state. Audio
+        // is a real ordered stream (unlike frame_update's last-value-wins
+        // semantics), so these hand off straight to AudioPlayer's own
+        // serial queue instead, which is what preserves ordering.
+        callbacks.audio_begin = { context in
+            guard let context else { return }
+            let bridge = Unmanaged<VncBridge>.fromOpaque(context).takeUnretainedValue()
+            bridge.audioPlayer.begin()
+        }
+        callbacks.audio_end = { context in
+            guard let context else { return }
+            let bridge = Unmanaged<VncBridge>.fromOpaque(context).takeUnretainedValue()
+            bridge.audioPlayer.end()
+        }
+        callbacks.audio_data = { context, pcm, length in
+            guard let context, let pcm else { return }
+            let bridge = Unmanaged<VncBridge>.fromOpaque(context).takeUnretainedValue()
+            // pcm is only valid for the duration of this call -- copy now.
+            let data = Data(bytes: pcm, count: length)
+            bridge.audioPlayer.enqueue(data)
+        }
+
+        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.mixWithOthers])
+        try? AVAudioSession.sharedInstance().setActive(true)
 
         client = vnc_client_create(&callbacks)
         host.withCString { hostPtr in
@@ -114,6 +143,8 @@ final class VncBridge: ObservableObject {
     }
 
     func disconnect() {
+        audioPlayer.teardown()
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         guard let client else { return }
         vnc_client_disconnect(client)
         vnc_client_destroy(client)
@@ -167,6 +198,19 @@ final class VncBridge: ObservableObject {
     func requestResize(width: Int, height: Int) {
         guard let client else { return }
         vnc_client_request_resize(client, Int32(width), Int32(height))
+    }
+
+    /// Mutes/unmutes remote audio: stops/resumes local playback
+    /// immediately (see AudioPlayer.setMuted's own comment on why that's
+    /// needed even though the server is also asked to stop/resume
+    /// sending, via the same TigerVNC-native audio extension negotiated
+    /// on connect) -- belt-and-suspenders, same reasoning as Android's
+    /// local mute flag.
+    func setAudioMuted(_ muted: Bool) {
+        audioMuted = muted
+        audioPlayer.setMuted(muted)
+        guard let client else { return }
+        vnc_client_set_audio_enabled(client, muted ? 0 : 1)
     }
 
     deinit {

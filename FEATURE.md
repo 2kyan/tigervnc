@@ -2,7 +2,9 @@
 
 `dev` combines the feature branches below on top of upstream `master`.
 Each feature is developed on its own branch based on `master`, so it can
-be merged or sent upstream independently.
+be merged or sent upstream independently. Work that needs more than one
+feature, such as audio in the mobile apps, only exists on `dev`. See
+`BUILD.md` for building everything.
 
 ## Branches
 
@@ -62,12 +64,14 @@ Build:
 - [x] `scripts/build-viewer.sh` and `scripts/build-server.sh`
       (`dev` uses the bundled FLTK 1.4, `audio-extension` the system FLTK 1.3)
 - [x] `AUDIO.md`: server-side audio setup
+- [x] `scripts/setup-audio.sh`: sound server and null sink for headless
+      machines (`dev` only)
 
 Testing:
 - [x] All targets build with audio on and off (Linux)
 - [x] Xvnc starts and connects to the sound server
 - [ ] End-to-end playback from Xvnc / x0vncserver to vncviewer
-- [ ] Mobile clients (`mobile_tigervncviewer`) set `supportsNativeAudio`
+- [x] Mobile clients set `supportsNativeAudio` (`dev` only, see below)
 
 ## Mobile viewer (`mobile`)
 
@@ -109,3 +113,33 @@ Testing:
 - [x] Android APK builds in this tree with `scripts/build-android.sh`
 - [ ] iOS build in this tree (needs a Mac; `build-ios.sh` not yet run)
 - [ ] Android on a physical device
+
+## Only on `dev`
+
+Mobile audio (needs both the audio extension and the mobile viewer):
+- [x] `mobile/core`: Opus decode and audio callbacks in `tigervnc_core.h`;
+      requests the native extension (`supportsNativeAudio`)
+- [x] Android playback and audio toggle (`VncBridge`, `SessionScreen`)
+- [x] iOS playback (`AudioPlayer.swift`) and audio toggle
+- [x] libopus cross-compiled for Android and iOS (device and Simulator)
+- [x] Smoke test Opus round trip; `audio_capture_manual_test` records a
+      real server's audio to WAV
+- [x] Audio design and findings merged into `mobile/DESIGN.md`
+- [ ] iOS audio built and played on a device or Simulator (needs a Mac)
+- [ ] Mobile playback against Xvnc / x0vncserver in this tree
+
+Build tooling:
+- [x] `BUILD.md`: building everything in this tree
+- [x] `scripts/install-deps.sh`: apt packages for all Linux builds
+- [x] Build scripts copy binaries to `bin/` under TigerVNC's Debian
+      package names (`xtigervncviewer`, `x0tigervncserver`,
+      `Xtigervnc`, ...)
+- [ ] `scripts/install-deps.sh` and `scripts/setup-audio.sh` run on a
+      fresh machine
+
+Testing on `dev`:
+- [x] Mobile core host build; smoke test passes, including the Opus
+      audio round trip
+- [x] `scripts/build-android.sh` builds the APK with audio
+- [x] `scripts/build-viewer.sh` and `scripts/build-server.sh` (with
+      Xvnc) build and copy to `bin/`

@@ -17,6 +17,7 @@
 #include <rdr/FdInStream.h>
 #include <rdr/FdOutStream.h>
 #include <rfb/CMsgWriter.h>
+#include <rfb/audioTypes.h>
 #include <rfb/Exception.h>
 #include <rfb/PixelBuffer.h>
 #include <rfb/ScreenSet.h>
@@ -65,7 +66,11 @@ VncClientImpl::VncClientImpl(const VncClientCallbacks& callbacks)
   supportsCursorPosition = false;
   supportsDesktopResize = true;
   supportsLEDState = false;
-  supportsAudio = false;
+  supportsAudio = true;
+  // Opus is a hard dependency of this core on every platform (see
+  // handleAudioData()), so the native extension is always decodable --
+  // CConnection only advertises pseudoEncodingTigerAudio when this is set.
+  supportsNativeAudio = true;
 
   // Created here, synchronously, before any worker thread can possibly
   // exist -- disconnect() (called from any thread, e.g. immediately
@@ -89,6 +94,8 @@ VncClientImpl::~VncClientImpl()
     thread_.join();
   if (wakeReadFd_ >= 0) ::close(wakeReadFd_);
   if (wakeWriteFd_ >= 0) ::close(wakeWriteFd_);
+  if (opusDecoder_ != nullptr)
+    opus_decoder_destroy(opusDecoder_);
 }
 
 void VncClientImpl::connect(const VncConnectOptions& options)
@@ -198,6 +205,19 @@ void VncClientImpl::requestResize(int width, int height)
     wantResize_ = true;
     resizeWidth_ = width;
     resizeHeight_ = height;
+  }
+  if (wakeWriteFd_ >= 0) {
+    char b = 0;
+    (void)write(wakeWriteFd_, &b, 1);
+  }
+}
+
+void VncClientImpl::setAudioEnabled(bool enabled)
+{
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    wantAudioEnabledChange_ = true;
+    audioEnabledTarget_ = enabled;
   }
   if (wakeWriteFd_ >= 0) {
     char b = 0;
@@ -373,6 +393,23 @@ void VncClientImpl::sendResizeRequest(int width, int height)
   writer()->writeSetDesktopSize(width, height, layout);
 }
 
+void VncClientImpl::sendAudioControl(bool enable)
+{
+  // Only ever send this once the server has confirmed it understands
+  // one of the two audio extensions -- unlike a pseudo-encoding
+  // capability announcement, an RFB message type sent to a server that
+  // doesn't recognise it is not guaranteed to be silently ignorable, so
+  // a no-op here (rather than sending regardless) is the safe default
+  // if support hasn't been negotiated yet (see vnc_client_set_audio_
+  // enabled()'s documented "resolves against current state" contract).
+  // Whichever extension was actually negotiated is the one whose wire
+  // format we must use -- the two are not interchangeable messages.
+  if (server.supportsTigerAudio)
+    writer()->writeAudioControl(enable);
+  else if (server.supportsQEMUAudio)
+    writer()->writeQEMUAudioEnable(enable);
+}
+
 void VncClientImpl::framebufferUpdateEnd()
 {
   CConnection::framebufferUpdateEnd();
@@ -409,6 +446,60 @@ void VncClientImpl::handleClipboardAnnounce(bool available)
 void VncClientImpl::bell()
 {
   // Not surfaced yet -- see DESIGN.md phase 5.
+}
+
+void VncClientImpl::handleAudioBegin()
+{
+  if (callbacks_.audio_begin)
+    callbacks_.audio_begin(callbacks_.context);
+}
+
+void VncClientImpl::handleAudioEnd()
+{
+  if (callbacks_.audio_end)
+    callbacks_.audio_end(callbacks_.context);
+}
+
+void VncClientImpl::handleAudioData(const uint8_t* data, size_t length)
+{
+  if (!callbacks_.audio_data)
+    return;
+
+  // QEMU's audio extension (the documented fallback -- see
+  // tigervnc_core.h's audio_data doc comment) is raw PCM, already in
+  // the fixed format promised to the app; only the native extension's
+  // payload is Opus-encoded. Keyed off audioFormatIsNative (what this
+  // client actually requested via requestTigerAudio(), set in
+  // CConnection), not a capability-advertisement flag -- see
+  // vncviewer/CConn.cxx::handleAudioData() for the same reasoning.
+  if (!audioFormatIsNative) {
+    callbacks_.audio_data(callbacks_.context, data, length);
+    return;
+  }
+
+  if (opusDecoder_ == nullptr) {
+    int error = OPUS_OK;
+    opusDecoder_ = opus_decoder_create(rfb::audioSampleRate,
+                                       rfb::audioChannels, &error);
+    if (error != OPUS_OK || opusDecoder_ == nullptr) {
+      opusDecoder_ = nullptr;
+      return;
+    }
+  }
+
+  // audioOpusFrameSamples is the exact frame size every encoder in this
+  // codebase (AudioCapturePulse, both copies) always sends, so a buffer
+  // sized for exactly that many samples per channel is sufficient --
+  // never partial, never larger (see audioTypes.h's own comment on why
+  // there's no per-message format negotiation to size for instead).
+  int16_t pcm[rfb::audioOpusFrameSamples * rfb::audioChannels];
+  int decoded = opus_decode(opusDecoder_, data, (opus_int32)length, pcm,
+                            rfb::audioOpusFrameSamples, 0);
+  if (decoded < 0)
+    return; // corrupt/unrecognised packet -- drop it, not fatal
+
+  callbacks_.audio_data(callbacks_.context, (const uint8_t*)pcm,
+                        (size_t)decoded * rfb::audioChannels * sizeof(int16_t));
 }
 
 void VncClientImpl::runThread(std::string host, int port, bool shared)
@@ -453,6 +544,9 @@ void VncClientImpl::runThread(std::string host, int port, bool shared)
         wantResize_ = false;
         int resizeW = resizeWidth_;
         int resizeH = resizeHeight_;
+        bool audioEnabledChangeNow = wantAudioEnabledChange_;
+        wantAudioEnabledChange_ = false;
+        bool audioEnabledTarget = audioEnabledTarget_;
         bool pointerPending = havePendingPointer_;
         havePendingPointer_ = false;
         OutgoingPointer pointer = pendingPointer_;
@@ -487,6 +581,8 @@ void VncClientImpl::runThread(std::string host, int port, bool shared)
           refreshFramebuffer();
         if (resizeNow)
           sendResizeRequest(resizeW, resizeH);
+        if (audioEnabledChangeNow)
+          sendAudioControl(audioEnabledTarget);
 
         if (disconnectNow)
           break;

@@ -63,6 +63,11 @@ struct SessionView: View {
                     Image(systemName: bridge.useReadableResize ? "textformat.size" : "viewfinder")
                 }
                 Button {
+                    bridge.setAudioMuted(!bridge.audioMuted)
+                } label: {
+                    Image(systemName: bridge.audioMuted ? "speaker.slash" : "speaker.wave.2")
+                }
+                Button {
                     onClose()
                 } label: {
                     Image(systemName: "xmark.circle.fill")

@@ -24,3 +24,5 @@ cmake_configure "$BUILD_DIR" -DBUILD_VIEWER=ON -DUSE_BUNDLED_FLTK=ON
 cmake_build "$BUILD_DIR" vncviewer
 
 log "built $BUILD_DIR/vncviewer/vncviewer"
+[ "$INSTALL_BIN" = "1" ] && log "copied to $BIN_DIR:"
+install_bin "$BUILD_DIR/vncviewer/vncviewer" xtigervncviewer

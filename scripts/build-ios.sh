@@ -1,7 +1,8 @@
 #!/bin/bash
 # Builds the iOS app (mobile/ios) end to end: cross-compiles
 # mobile/third_party/ios's dependencies for both the Simulator and a
-# physical device, builds the mobile/core C ABI wrapper (tigervnc_core)
+# physical device (including libopus for the audio extension, see
+# AUDIO.md), builds the mobile/core C ABI wrapper (tigervnc_core)
 # against each, generates the Xcode project from mobile/ios/project.yml
 # (XcodeGen), and builds the app.
 #
@@ -37,10 +38,10 @@ if ! command -v xcodegen >/dev/null 2>&1; then
   exit 1
 fi
 
-echo "==> 1/4: cross-compiling mobile/third_party/ios device dependencies"
+echo "==> 1/4: cross-compiling mobile/third_party/ios device dependencies (incl. libopus)"
 "$THIRD_PARTY_DIR/build-deps.sh"
 
-echo "==> 2/4: cross-compiling mobile/third_party/ios Simulator dependencies"
+echo "==> 2/4: cross-compiling mobile/third_party/ios Simulator dependencies (incl. libopus)"
 "$THIRD_PARTY_DIR/build-deps-sim.sh"
 
 echo "==> 3/4: building mobile/core (tigervnc_core) for device and Simulator"

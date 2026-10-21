@@ -53,6 +53,15 @@ find_package(GnuTLS REQUIRED)
 find_package(Nettle REQUIRED)
 find_package(Threads REQUIRED)
 
+# Decodes the TigerVNC-native audio extension's Opus-encoded payload
+# back to PCM in VncClientImpl::handleAudioData() -- see
+# rfb/audioTypes.h. No CMake config/module ships for Opus, only a
+# pkg-config .pc file, same as the top-level CMakeLists.txt works around
+# for it. For Android and iOS, third_party/{android,ios}/build-deps*.sh
+# cross-compile libopus into their sysroots.
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(OPUS REQUIRED opus)
+
 if(GNUTLS_FOUND)
   set(HAVE_GNUTLS 1)
   add_compile_definitions(HAVE_GNUTLS=1)
@@ -72,10 +81,11 @@ target_include_directories(tigervnc_core
   PUBLIC include
   PRIVATE src
 )
-target_include_directories(tigervnc_core SYSTEM PRIVATE ${NETTLE_INCLUDE_DIRS})
+target_include_directories(tigervnc_core SYSTEM PRIVATE ${NETTLE_INCLUDE_DIRS} ${OPUS_INCLUDE_DIRS})
 target_link_libraries(tigervnc_core
   PRIVATE rfbclient rfb rdr network core
   PRIVATE Threads::Threads
+  PRIVATE ${OPUS_LIBRARIES}
 )
 
 # Host-only test tools (a real RFB server + a smoke-test client), for

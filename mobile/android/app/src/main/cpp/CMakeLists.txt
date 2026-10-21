@@ -44,5 +44,6 @@ find_library(LOG_LIB log)
 target_link_libraries(vncjni PRIVATE
   tigervnc_core rfbclient rfb rdr network core
   gnutls hogweed nettle gmp tasn1 pixman-1 jpeg
+  opus
   z ${LOG_LIB}
 )
