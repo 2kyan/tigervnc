@@ -1,0 +1,54 @@
+name: TigerVNCViewer
+options:
+  bundleIdPrefix: com.tigervnc.mobile
+  deploymentTarget:
+    iOS: "17.0"
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    TARGETED_DEVICE_FAMILY: "1,2" # iPhone + iPad
+    SWIFT_OBJC_BRIDGING_HEADER: App/BridgingHeader.h
+    HEADER_SEARCH_PATHS: $(SRCROOT)/../core/include
+    CLANG_CXX_LANGUAGE_STANDARD: gnu++17
+    CLANG_CXX_LIBRARY: libc++
+    OTHER_LDFLAGS: >-
+      -lc++ -ltigervnc_core -lrfbclient -lrfb -lrdr -lnetwork -lcore
+      -lgnutls -lhogweed -lnettle -lgmp -ltasn1 -lpixman-1 -ljpeg -lz
+    # Prebuilt static libs live in two trees (device vs Simulator SDK --
+    # same arm64 architecture, different platform, can't be lipo'd
+    # together). See third_party/ios/build-deps.sh /
+    # build-deps-sim.sh and core/CMakeLists.txt.
+    LIBRARY_SEARCH_PATHS[sdk=iphoneos*]: >-
+      $(SRCROOT)/../core/build/ios
+      $(SRCROOT)/../core/build/ios/common/rfb
+      $(SRCROOT)/../core/build/ios/common/rdr
+      $(SRCROOT)/../core/build/ios/common/network
+      $(SRCROOT)/../core/build/ios/common/core
+      $(SRCROOT)/../third_party/ios/sysroot/lib
+    LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]: >-
+      $(SRCROOT)/../core/build/ios-sim
+      $(SRCROOT)/../core/build/ios-sim/common/rfb
+      $(SRCROOT)/../core/build/ios-sim/common/rdr
+      $(SRCROOT)/../core/build/ios-sim/common/network
+      $(SRCROOT)/../core/build/ios-sim/common/core
+      $(SRCROOT)/../third_party/ios/sysroot-sim/lib
+
+targets:
+  TigerVNCViewer:
+    type: application
+    platform: iOS
+    sources:
+      - App
+    info:
+      path: App/Info.plist
+      properties:
+        UILaunchScreen: {}
+        NSLocalNetworkUsageDescription: >-
+          TigerVNC Viewer connects to VNC servers on your local network.
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.tigervnc.mobile.viewer
+        CODE_SIGN_STYLE: Automatic

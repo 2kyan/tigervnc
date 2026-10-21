@@ -1,0 +1,36 @@
+# Standalone build of TigerVNC's common/{core,rdr,network,rfb} for
+# Android (arm64-v8a), bypassing tigervnc's top-level CMakeLists.txt (which
+# pulls in X11/FLTK/server-only requirements this spike doesn't need).
+# Mirrors third_party/ios/CoreSpikeCMakeLists.txt -- see it for the
+# reasoning, this is the same approach against the NDK toolchain instead.
+cmake_minimum_required(VERSION 3.10.0)
+project(tigervnc_core_android CXX C)
+
+set(CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake/Modules)
+include(CMakeMacroLibtoolFile)
+
+set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=gnu99")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=gnu++11")
+
+# core/ requires these even with NLS off (see common/core/CMakeLists.txt);
+# leave empty since ENABLE_NLS is not defined for this spike.
+set(Intl_INCLUDE_DIR "")
+set(Intl_LIBRARIES "")
+
+find_package(ZLIB REQUIRED)
+find_package(Pixman REQUIRED)
+find_package(JPEG REQUIRED)
+find_package(GnuTLS REQUIRED)
+find_package(Nettle REQUIRED)
+
+if(GNUTLS_FOUND)
+  set(HAVE_GNUTLS 1)
+  add_compile_definitions(HAVE_GNUTLS=1)
+endif()
+if(NETTLE_FOUND)
+  set(HAVE_NETTLE 1)
+  add_compile_definitions(HAVE_NETTLE=1)
+endif()
+
+add_subdirectory(common)
