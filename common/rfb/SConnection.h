@@ -163,6 +163,8 @@ namespace rfb {
     void handleClipboardProvide(uint32_t flags, const size_t* lengths,
                                 const uint8_t* const* data) override;
 
+    void audioControl(bool enable) override;
+
     // Methods to be overridden in a derived class
 
     // supportsLocalCursor() is called whenever the status of
@@ -244,6 +246,17 @@ namespace rfb {
     // called if the clipboard data was no longer available when the
     // client received the request.
     virtual void handleClipboardData(const char* data);
+
+    // handleAudioControl() is called when the client asks to
+    // enable/disable the TigerVNC-native audio extension (see
+    // audioTypes.h). This is only ever the client's request -- it does
+    // not mean anything is actually available to send. A derived class
+    // decides whether/when to actually start or stop pushing audio
+    // (e.g. by starting/stopping a capture backend and gating its
+    // per-connection push loop), and must check client.supportsTigerAudio()
+    // (or just call writer()->writeAudioBegin()/writeAudioData()/
+    // writeAudioEnd(), which already check this) before writing.
+    virtual void handleAudioControl(bool enable);
 
     // failConnection() prints a message to the log, sends a connection
     // failed message to the client (if possible) and throws an

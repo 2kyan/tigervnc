@@ -76,6 +76,13 @@ if(UNIX AND NOT APPLE AND FLTK_1_4)
   set_target_properties(vncviewer PROPERTIES ENABLE_EXPORTS TRUE)
 endif()
 
+# Opus decode for the TigerVNC-native audio extension (see
+# CConn.cxx::handleAudioData())
+if(HAVE_OPUS)
+  target_include_directories(vncviewer SYSTEM PRIVATE ${OPUS_INCLUDE_DIRS})
+  target_link_libraries(vncviewer ${OPUS_LIBRARIES})
+endif()
+
 if(GNUTLS_FOUND)
   target_include_directories(vncviewer SYSTEM PUBLIC ${GNUTLS_INCLUDE_DIR})
   target_link_libraries(vncviewer ${GNUTLS_LIBRARIES})

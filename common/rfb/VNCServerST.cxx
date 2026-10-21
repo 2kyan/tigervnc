@@ -87,7 +87,7 @@ static core::LogWriter connectionsLog("Connections");
 
 VNCServerST::VNCServerST(const char* name_, SDesktop* desktop_)
   : desktop(desktop_), desktopStarted(false),
-    desktopStarting(false), blockCounter(0), pb(nullptr),
+    desktopStarting(false), audioStreaming(false), blockCounter(0), pb(nullptr),
     ledState(ledUnknown), name(name_), pointerClient(nullptr),
     clipboardClient(nullptr), pointerClientTime(0),
     comparer(nullptr), cursor(new Cursor(0, 0, {}, nullptr)),
@@ -450,6 +450,32 @@ void VNCServerST::bell()
   std::list<VNCSConnectionST*>::iterator ci;
   for (ci = clients.begin(); ci != clients.end(); ++ci)
     (*ci)->bellOrClose();
+}
+
+void VNCServerST::sendAudioBegin()
+{
+  audioStreaming = true;
+  std::list<VNCSConnectionST*>::iterator ci;
+  for (ci = clients.begin(); ci != clients.end(); ++ci)
+    if ((*ci)->audioEnabled())
+      (*ci)->writeAudioBeginOrClose();
+}
+
+void VNCServerST::sendAudioData(const uint8_t* data, size_t length)
+{
+  std::list<VNCSConnectionST*>::iterator ci;
+  for (ci = clients.begin(); ci != clients.end(); ++ci)
+    if ((*ci)->audioEnabled())
+      (*ci)->writeAudioDataOrClose(data, length);
+}
+
+void VNCServerST::sendAudioEnd()
+{
+  audioStreaming = false;
+  std::list<VNCSConnectionST*>::iterator ci;
+  for (ci = clients.begin(); ci != clients.end(); ++ci)
+    if ((*ci)->audioEnabled())
+      (*ci)->writeAudioEndOrClose();
 }
 
 void VNCServerST::setName(const char* name_)

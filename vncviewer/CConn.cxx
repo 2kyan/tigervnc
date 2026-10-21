@@ -31,6 +31,10 @@
 #include <gnutls/x509.h>
 #endif
 
+#ifdef HAVE_OPUS
+#include <opus/opus.h>
+#endif
+
 #include <core/Exception.h>
 #include <core/LogWriter.h>
 #include <core/Timer.h>
@@ -47,6 +51,7 @@
 #include <rfb/CSecurity.h>
 #include <rfb/Exception.h>
 #include <rfb/Security.h>
+#include <rfb/audioTypes.h>
 #include <rfb/fenceTypes.h>
 #include <rfb/obfuscate.h>
 #include <rfb/screenTypes.h>
@@ -95,7 +100,7 @@ static const unsigned bpsEstimateWindow = 1000;
 CConn::CConn()
   : serverPort(0), sock(nullptr),
     msgTimer(this, &CConn::processNextMsg), desktop(nullptr),
-    audioOutput(nullptr),
+    audioOutput(nullptr), opusDecoder(nullptr),
     updateCount(0), pixelCount(0),
     lastServerEncoding((unsigned int)-1), bpsEstimate(20000000)
 {
@@ -113,6 +118,9 @@ CConn::CConn()
   if (playAudio) {
     audioOutput = AudioOutput::create();
     supportsAudio = audioOutput != nullptr;
+#ifdef HAVE_OPUS
+    supportsNativeAudio = supportsAudio;
+#endif
   }
 #endif
 
@@ -135,6 +143,11 @@ CConn::~CConn()
     delete desktop;
 
   delete audioOutput;
+
+#ifdef HAVE_OPUS
+  if (opusDecoder != nullptr)
+    opus_decoder_destroy(opusDecoder);
+#endif
 
   if (sock) {
     struct timeval now;
@@ -958,7 +971,41 @@ void CConn::handleAudioData(const uint8_t* data, size_t length)
   if (audioOutput == nullptr)
     return;
 
-  audioOutput->play(data, length);
+  // QEMU's audio extension and the TigerVNC-native one (rfb/audioTypes.h)
+  // share this one handleAudioBegin/End/Data entry point (see
+  // CConnection::audioData()), but only the native extension's payload
+  // is Opus-encoded -- QEMU's is raw PCM, which audioOutput->play()
+  // already handles correctly and unchanged. Deliberately keyed off
+  // audioFormatIsNative (which format we actually requested), not
+  // server.supportsTigerAudio (which only says the server advertised
+  // understanding it, and says nothing about which format it is
+  // actually sending) -- a server could in principle advertise both
+  // extensions, and this is the one tied to what we asked for.
+  if (!audioFormatIsNative) {
+    audioOutput->play(data, length);
+    return;
+  }
+
+#ifdef HAVE_OPUS
+  if (opusDecoder == nullptr) {
+    int error = OPUS_OK;
+    opusDecoder = opus_decoder_create(rfb::audioSampleRate,
+                                      rfb::audioChannels, &error);
+    if (error != OPUS_OK || opusDecoder == nullptr) {
+      opusDecoder = nullptr;
+      return;
+    }
+  }
+
+  int16_t pcm[rfb::audioOpusFrameSamples * rfb::audioChannels];
+  int decoded = opus_decode(opusDecoder, data, (opus_int32)length, pcm,
+                            rfb::audioOpusFrameSamples, 0);
+  if (decoded < 0)
+    return; // corrupt/unrecognised packet -- drop it, not fatal
+
+  audioOutput->play((const uint8_t*)pcm,
+                    (size_t)decoded * rfb::audioChannels * sizeof(int16_t));
+#endif
 }
 
 

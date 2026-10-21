@@ -30,6 +30,9 @@ namespace rfb {
 
   const int msgTypeServerFence = 248;
 
+  // TigerVNC-native audio extension (see audioTypes.h)
+  const int msgTypeAudioStream = 153;
+
   // client to server
 
   const int msgTypeSetPixelFormat = 0;
@@ -45,6 +48,9 @@ namespace rfb {
   const int msgTypeClientFence = 248;
 
   const int msgTypeSetDesktopSize = 251;
+
+  // TigerVNC-native audio extension (see audioTypes.h)
+  const int msgTypeAudioControl = 154;
 
   const int msgTypeQEMUClientMessage = 255;
 

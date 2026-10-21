@@ -21,6 +21,14 @@ add_executable(x0vncserver
 target_include_directories(x0vncserver SYSTEM PUBLIC ${X11_INCLUDE_DIR})
 target_link_libraries(x0vncserver tx rfbserver rfb network rdr unixcommon core)
 
+# Remote audio (TigerVNC-native extension) capture backend: PulseAudio
+# capture + Opus encode
+if(HAVE_AUDIO_CAPTURE)
+  target_sources(x0vncserver PRIVATE AudioCapturePulse.cxx)
+  target_include_directories(x0vncserver SYSTEM PUBLIC ${PULSE_INCLUDE_DIRS} ${OPUS_INCLUDE_DIRS})
+  target_link_libraries(x0vncserver ${PULSE_LIBRARIES} ${OPUS_LIBRARIES})
+endif()
+
 # systemd support (socket activation)
 if (SYSTEMD_FOUND)
   target_include_directories(x0vncserver SYSTEM PRIVATE ${SYSTEMD_INCLUDE_DIRS})

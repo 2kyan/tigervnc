@@ -77,6 +77,7 @@ namespace rfb {
 
     bool supportsQEMUKeyEvent;
     bool supportsQEMUAudio;
+    bool supportsTigerAudio;
     bool supportsSetDesktopSize;
     bool supportsFence;
     bool supportsContinuousUpdates;

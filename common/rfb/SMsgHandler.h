@@ -67,6 +67,12 @@ namespace rfb {
                                         const size_t* lengths,
                                         const uint8_t* const* data) = 0;
 
+    // Called when the client sends msgTypeAudioControl (see
+    // audioTypes.h) -- enable/disable is the client's request, not a
+    // guarantee anything is actually available to send; a derived
+    // class decides whether/when to actually start pushing audio.
+    virtual void audioControl(bool enable) = 0;
+
     ClientParams client;
   };
 }

@@ -96,6 +96,15 @@ target_link_libraries(w0vncserver ${UUID_LIBRARIES})
 target_link_libraries(w0vncserver ${XKBCOMMON_LIBRARIES})
 target_link_libraries(w0vncserver ${WAYLANDCLIENT_LIBRARIES})
 
+
+# Remote audio (TigerVNC-native extension) capture backend: PulseAudio
+# capture + Opus encode, shared with x0vncserver
+if(HAVE_AUDIO_CAPTURE)
+  target_sources(w0vncserver PRIVATE ../x0vncserver/AudioCapturePulse.cxx)
+  target_include_directories(w0vncserver SYSTEM PUBLIC ${PULSE_INCLUDE_DIRS} ${OPUS_INCLUDE_DIRS})
+  target_link_libraries(w0vncserver ${PULSE_LIBRARIES} ${OPUS_LIBRARIES})
+endif()
+
 target_link_libraries(w0vncserver-forget core)
 
 install(TARGETS w0vncserver w0vncserver-forget DESTINATION ${CMAKE_INSTALL_FULL_BINDIR})

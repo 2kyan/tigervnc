@@ -28,6 +28,7 @@
 
 namespace network { class Socket; }
 
+struct OpusDecoder;
 class AudioOutput;
 class DesktopWindow;
 
@@ -112,6 +113,20 @@ private:
   DesktopWindow *desktop;
 
   AudioOutput *audioOutput;
+
+  // Decodes the TigerVNC-native audio extension's Opus-encoded payload
+  // (see rfb/audioTypes.h) back to the fixed S16LE/48kHz/stereo PCM
+  // format audioOutput->play() expects -- AudioOutputPulse has no idea
+  // Opus exists, same as every other AudioOutput backend here, so this
+  // has to happen before handleAudioData() calls play(). Created
+  // lazily, on first use, from handleAudioData(); persists for the
+  // connection's lifetime rather than being recreated per
+  // handleAudioBegin()/handleAudioEnd() pair, since those just mark
+  // periods of silence within one logical stream (mirrors
+  // core/src/VncClientImpl.cxx's identical opusDecoder_ field -- this
+  // is the same decode step, just for this separate, non-mobile
+  // client).
+  OpusDecoder *opusDecoder;
 
   unsigned updateCount;
   unsigned pixelCount;

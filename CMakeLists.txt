@@ -231,6 +231,26 @@ if(ENABLE_AUDIO)
   endif()
 endif()
 
+# Opus is used by the TigerVNC-native audio extension (rfb/audioTypes.h):
+# encoding in the servers' PulseAudio capture backend, decoding in the
+# viewer. It only ships a pkg-config file.
+if(HAVE_AUDIO)
+  find_package(PkgConfig)
+  if(PKG_CONFIG_FOUND)
+    pkg_check_modules(OPUS opus)
+  endif()
+  if(OPUS_FOUND)
+    set(HAVE_OPUS 1)
+    if(PULSE_FOUND)
+      set(HAVE_AUDIO_CAPTURE 1)
+    endif()
+  elseif(ENABLE_AUDIO STREQUAL "AUTO")
+    message(WARNING "Opus NOT found. TigerVNC audio extension disabled.")
+  else()
+    message(FATAL_ERROR "Opus NOT found. Required by the TigerVNC audio extension.")
+  endif()
+endif()
+
 # Check for libjpeg
 find_package(JPEG REQUIRED)
 

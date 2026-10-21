@@ -31,6 +31,10 @@
 #include <errno.h>
 #include <pwd.h>
 
+#include <deque>
+#include <mutex>
+#include <vector>
+
 #include <core/Configuration.h>
 #include <core/Logger_stdio.h>
 #include <core/LogWriter.h>
@@ -61,6 +65,9 @@
 #include "Geometry.h"
 #include "Image.h"
 #include "PollingScheduler.h"
+#ifdef HAVE_AUDIO_CAPTURE
+#include "AudioCapturePulse.h"
+#endif
 
 static core::LogWriter vlog("Main");
 
@@ -302,6 +309,71 @@ static void usage()
   exit(1);
 }
 
+#ifdef HAVE_AUDIO_CAPTURE
+// Hands captured audio off from AudioCapturePulse's callbacks (which
+// fire on PulseAudio's own mainloop thread) to this server's single
+// main thread, which is the only place it is safe to touch
+// VNCServerST/SMsgWriter -- nothing in this codebase is thread-safe by
+// design (see VNCServerST.h). A core::Timer, not the main loop's own
+// per-iteration work, is what drains this: select() can block
+// indefinitely when idle (no client activity, no other timer due), so
+// only a registered timer guarantees the main loop wakes up often
+// enough to drain what PulseAudio keeps delivering in the background.
+class AudioBridge : public core::Timer::Callback {
+public:
+  explicit AudioBridge(rfb::VNCServerST* server_) : server(server_), timer(this)
+  {
+    timer.start(20);
+  }
+
+  // Called from AudioCapturePulse's callbacks -- keep this minimal and
+  // non-blocking, same constraint PulseAudio's own callbacks are under.
+  void onBegin()
+  {
+    std::lock_guard<std::mutex> lock(mutex);
+    events.push_back({Event::Begin, {}});
+  }
+  void onData(const uint8_t* data, size_t length)
+  {
+    std::lock_guard<std::mutex> lock(mutex);
+    events.push_back({Event::Data, std::vector<uint8_t>(data, data + length)});
+  }
+  void onEnd()
+  {
+    std::lock_guard<std::mutex> lock(mutex);
+    events.push_back({Event::End, {}});
+  }
+
+private:
+  struct Event {
+    enum Kind { Begin, Data, End } kind;
+    std::vector<uint8_t> data;
+  };
+
+  void handleTimeout(core::Timer* t) override
+  {
+    std::deque<Event> drained;
+    {
+      std::lock_guard<std::mutex> lock(mutex);
+      drained.swap(events);
+    }
+    for (const Event& e : drained) {
+      switch (e.kind) {
+      case Event::Begin: server->sendAudioBegin(); break;
+      case Event::Data:  server->sendAudioData(e.data.data(), e.data.size()); break;
+      case Event::End:   server->sendAudioEnd(); break;
+      }
+    }
+    t->repeat();
+  }
+
+  rfb::VNCServerST* server;
+  core::Timer timer;
+  std::mutex mutex;
+  std::deque<Event> events;
+};
+#endif
+
 int main(int argc, char** argv)
 {
   setlocale(LC_ALL, "");
@@ -381,6 +453,30 @@ int main(int argc, char** argv)
     XDesktop desktop(dpy, &geo);
 
     rfb::VNCServerST server(desktopName, &desktop);
+
+#ifdef HAVE_AUDIO_CAPTURE
+    // Remote audio (TigerVNC-native extension -- see rfb/audioTypes.h).
+    // Optional: if no PulseAudio sound server is reachable, log it and
+    // carry on video-only, same "degrade gracefully" philosophy this
+    // file already applies to optional X11 extensions (Xdamage/Xfixes/
+    // Xrandr/XTest -- see CMakeLists.txt).
+    AudioBridge audioBridge(&server);
+    AudioCapturePulse audioCapture(
+      [&audioBridge](const uint8_t* data, size_t length) {
+        audioBridge.onData(data, length);
+      },
+      [&audioBridge]() { audioBridge.onBegin(); },
+      [&audioBridge]() { audioBridge.onEnd(); });
+    if (!audioCapture.isAvailable())
+      vlog.info(_("No sound server found -- will keep retrying in the "
+                  "background"));
+    // Lets a client toggling audio on (VNCSConnectionST::
+    // handleAudioControl()) trigger an immediate reconnect attempt if
+    // the sound server wasn't available yet -- on top of
+    // AudioCapturePulse's own periodic automatic retry. See
+    // AudioCapturePulse::retryNow()'s own comment.
+    server.setAudioRetryCallback([&audioCapture]() { audioCapture.retryNow(); });
+#endif
 
     FileTcpFilter fileTcpFilter(hostsFile);
 

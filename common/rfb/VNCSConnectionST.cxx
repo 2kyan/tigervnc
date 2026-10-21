@@ -74,7 +74,7 @@ VNCSConnectionST::VNCSConnectionST(VNCServerST* server_, network::Socket *s,
     losslessTimer(this), server(server_),
     updateRenderedCursor(false), removeRenderedCursor(false),
     continuousUpdates(false), encodeManager(this), idleTimer(this),
-    pointerEventTime(0), clientHasCursor(false)
+    pointerEventTime(0), clientHasCursor(false), audioEnabled_(false)
 {
   socketTimer.start(core::secsToMillis(LOGIN_GRACE_TIME));
 
@@ -302,6 +302,33 @@ void VNCSConnectionST::bellOrClose()
 {
   try {
     if (state() == RFBSTATE_NORMAL) writer()->writeBell();
+  } catch(std::exception& e) {
+    close(e.what());
+  }
+}
+
+void VNCSConnectionST::writeAudioBeginOrClose()
+{
+  try {
+    if (state() == RFBSTATE_NORMAL) writer()->writeAudioBegin();
+  } catch(std::exception& e) {
+    close(e.what());
+  }
+}
+
+void VNCSConnectionST::writeAudioDataOrClose(const uint8_t* data, size_t length)
+{
+  try {
+    if (state() == RFBSTATE_NORMAL) writer()->writeAudioData(data, length);
+  } catch(std::exception& e) {
+    close(e.what());
+  }
+}
+
+void VNCSConnectionST::writeAudioEndOrClose()
+{
+  try {
+    if (state() == RFBSTATE_NORMAL) writer()->writeAudioEnd();
   } catch(std::exception& e) {
     close(e.what());
   }
@@ -802,6 +829,35 @@ void VNCSConnectionST::handleClipboardAnnounce(bool available)
 void VNCSConnectionST::handleClipboardData(const char* data)
 {
   server->handleClipboardData(this, data);
+}
+
+// The client's enable/disable request is just tracked here --
+// audioEnabled() -- since actually capturing/sending audio is a
+// shared resource across every connection, not per-connection state.
+// Whatever drives the real capture backend (e.g. x0vncserver's main
+// loop) checks audioEnabled() per connection before pushing data via
+// writeAudioBeginOrClose()/writeAudioDataOrClose()/writeAudioEndOrClose().
+void VNCSConnectionST::handleAudioControl(bool enable)
+{
+  audioEnabled_ = enable;
+
+  if (!enable)
+    return;
+
+  // Give the real capture backend a chance to reconnect to the
+  // system's sound server, in case it wasn't available yet when this
+  // server started (see AudioCapturePulse::retryNow()) -- a client
+  // toggling audio off then back on is as good a manual "try again
+  // now" signal as any, and this is a no-op if already connected.
+  server->requestAudioRetry();
+
+  // A stream already in progress means the real sendAudioBegin()
+  // already broadcast (to whoever was enabled at the time, possibly
+  // nobody) before this client asked to join -- give it a begin of its
+  // own now so its own state machine matches reality, rather than
+  // silently starting to receive audio_data with no audio_begin.
+  if (server->isAudioStreaming())
+    writeAudioBeginOrClose();
 }
 
 // supportsLocalCursor() is called whenever the status of

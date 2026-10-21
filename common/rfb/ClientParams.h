@@ -104,6 +104,7 @@ namespace rfb {
     bool supportsFence() const;
     bool supportsContinuousUpdates() const;
     bool supportsExtendedMouseButtons() const;
+    bool supportsTigerAudio() const;
 
     int compressLevel;
     int qualityLevel;
