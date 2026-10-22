@@ -119,7 +119,9 @@ private:
   void attemptConnect();
   void handleTimeout(core::Timer* t) override;
 
-  void openStream(); // called once server info tells us the default sink
+  // Called once server info tells us the default sink, and again
+  // whenever the default sink changes
+  void openStream();
 
   void handleData(const void* data, size_t length);
   // Consumes exactly-frame-sized chunks off the front of pcmAccum,
@@ -129,6 +131,9 @@ private:
   static void contextStateCallback(pa_context* context, void* userdata);
   static void serverInfoCallback(pa_context* context,
                                  const pa_server_info* info, void* userdata);
+  static void subscribeCallback(pa_context* context,
+                                pa_subscription_event_type_t type,
+                                uint32_t index, void* userdata);
   static void streamStateCallback(pa_stream* stream, void* userdata);
   static void streamReadCallback(pa_stream* stream, size_t length,
                                  void* userdata);

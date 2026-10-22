@@ -309,6 +309,15 @@ bool AudioCapturePulse::connect()
                                                   serverInfoCallback, this);
     if (op != nullptr)
       pa_operation_unref(op);
+
+    // Server change events cover the default sink changing (e.g.
+    // scripts/setup-audio.sh switching to a virtual sink while we're
+    // running) -- see subscribeCallback().
+    pa_context_set_subscribe_callback(context, subscribeCallback, this);
+    op = pa_context_subscribe(context, PA_SUBSCRIPTION_MASK_SERVER,
+                              nullptr, nullptr);
+    if (op != nullptr)
+      pa_operation_unref(op);
   }
 
   pa_threaded_mainloop_unlock(mainloop);
@@ -433,8 +442,39 @@ void AudioCapturePulse::serverInfoCallback(pa_context* /*context*/,
     return;
   }
 
-  self->monitorSourceName = std::string(info->default_sink_name) + ".monitor";
+  std::string name = std::string(info->default_sink_name) + ".monitor";
+
+  // Also reached on every server change event, most of which don't
+  // touch the default sink.
+  if (self->stream != nullptr && name == self->monitorSourceName)
+    return;
+
+  if (self->stream != nullptr) {
+    vlog.info("Default sink changed, now capturing from %s", name.c_str());
+    pa_stream_disconnect(self->stream);
+    pa_stream_unref(self->stream);
+    self->stream = nullptr;
+  }
+
+  self->monitorSourceName = name;
   self->openStream();
+}
+
+void AudioCapturePulse::subscribeCallback(pa_context* context,
+                                          pa_subscription_event_type_t type,
+                                          uint32_t /*index*/,
+                                          void* userdata)
+{
+  if ((type & PA_SUBSCRIPTION_EVENT_FACILITY_MASK) !=
+      PA_SUBSCRIPTION_EVENT_SERVER)
+    return;
+
+  // Re-read the default sink; serverInfoCallback() reopens the capture
+  // stream if it changed.
+  pa_operation* op = pa_context_get_server_info(context, serverInfoCallback,
+                                                userdata);
+  if (op != nullptr)
+    pa_operation_unref(op);
 }
 
 void AudioCapturePulse::streamStateCallback(pa_stream* stream,

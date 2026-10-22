@@ -101,11 +101,44 @@ pactl set-default-sink virtual_speaker
 ```
 
 On a system that uses PipeWire, skip installing `pulseaudio` and make
-sure `pipewire-pulse` is running (`systemctl --user status
-pipewire-pulse`); the `pactl` commands are the same.
+sure PipeWire is running; the `pactl` commands are the same. PipeWire
+can be installed but not running, for example when it was installed
+after the user's systemd instance started. Start it with:
+
+```sh
+systemctl --user start pipewire.socket pipewire-pulse.socket \
+  pipewire wireplumber pipewire-pulse
+```
+
+`scripts/setup-audio.sh` does all of the above.
+
+The same setup also works on a machine with real sound hardware, if you
+want audio to play only in the VNC viewer and not on the machine's own
+speakers. Once the virtual sink is the default, move applications that
+are already playing with `pactl move-sink-input <id> virtual_speaker`.
+A running VNC server notices the new default sink and switches to it on
+its own.
 
 The null sink does not survive a restart of the sound server. To make it
-permanent with PulseAudio, add these lines to `~/.config/pulse/default.pa`:
+permanent with PipeWire, create
+`~/.config/pipewire/pipewire.conf.d/tigervnc-virtual_speaker.conf`
+(WirePlumber remembers the default sink by itself):
+
+```
+context.objects = [
+  { factory = adapter
+    args = {
+      factory.name     = support.null-audio-sink
+      node.name        = "virtual_speaker"
+      node.description = "Virtual_Speaker"
+      media.class      = Audio/Sink
+      audio.position   = [ FL FR ]
+    }
+  }
+]
+```
+
+With PulseAudio, add these lines to `~/.config/pulse/default.pa`:
 
 ```
 .include /etc/pulse/default.pa
@@ -115,6 +148,41 @@ set-default-sink virtual_speaker
 
 Startup order does not matter: if the VNC server starts before the sound
 server, it picks it up on its next retry (within 5 seconds).
+
+### Switching the output sink
+
+The VNC server captures whichever sink is the default. On a machine with
+real sound hardware, choose where audio plays by changing the default
+sink: the virtual sink plays only in the VNC viewer, and a hardware sink
+plays on the machine's own speakers as well as in the viewer.
+
+```sh
+# List sinks and show the current default
+pactl list short sinks
+pactl get-default-sink
+
+# Play only in the VNC viewer
+pactl set-default-sink virtual_speaker
+
+# Play on the hardware too (use a name from "pactl list short sinks")
+pactl set-default-sink alsa_output.<device>.analog-stereo
+```
+
+Applications that are already playing may stay on the old sink. Move
+them too:
+
+```sh
+pactl list short sink-inputs | cut -f1 | xargs -r -I{} pactl move-sink-input {} virtual_speaker
+```
+
+The same can be done from a desktop's sound settings (in MATE: the
+panel's volume icon, *Sound Preferences*, *Output* tab) or with
+`pavucontrol`, whose *Playback* tab also moves single applications.
+
+On PipeWire, WirePlumber remembers the chosen default across restarts
+and reboots, as long as that sink still exists. A running VNC server
+switches to the new default sink's monitor on its own and logs
+`Default sink changed, now capturing from <sink>.monitor`.
 
 ## Verifying
 
