@@ -108,8 +108,8 @@ AudioCapturePulse::AudioCapturePulse(DataCallback onData,
                                      BeginCallback onBegin,
                                      EndCallback onEnd)
   : onData_(onData), onBegin_(onBegin), onEnd_(onEnd),
-    available(false), opened(false), timedOut(false),
-    mainloop(nullptr), context(nullptr), stream(nullptr),
+    available(false), opened(false), timedOut(false), lost(false),
+    failedAttempts(0), mainloop(nullptr), context(nullptr), stream(nullptr),
     streaming(false), silentFragments(0), encoder(nullptr),
     retryTimer(this)
 {
@@ -124,11 +124,13 @@ AudioCapturePulse::AudioCapturePulse(DataCallback onData,
   opus_encoder_ctl(encoder, OPUS_SET_BITRATE(rfb::audioOpusBitrate));
 
   attemptConnect();
-  if (!available) {
+  if (!available)
     vlog.info("No sound server found yet -- will retry every %ums",
               audioCaptureRetryMs);
-    retryTimer.start(audioCaptureRetryMs);
-  }
+  // Keeps running while connected too, to notice a lost connection
+  // (e.g. PipeWire stopped with the user's last login session and
+  // started again with the next) -- see handleTimeout().
+  retryTimer.start(audioCaptureRetryMs);
 }
 
 AudioCapturePulse::~AudioCapturePulse()
@@ -170,9 +172,12 @@ void AudioCapturePulse::teardown()
   // Reset per-attempt state too -- otherwise a stale timedOut=true
   // from a previous failed attempt would make the very next attempt's
   // wait loop (in connect()) bail out instantly instead of actually
-  // waiting up to connectTimeoutMs.
+  // waiting up to connectTimeoutMs. Likewise lost, which
+  // pa_context_disconnect() above can't set (it only terminates the
+  // context), but a failed previous attempt can have.
   opened = false;
   timedOut = false;
+  lost = false;
 }
 
 void AudioCapturePulse::attemptConnect()
@@ -181,14 +186,24 @@ void AudioCapturePulse::attemptConnect()
 
   available = connect();
   if (available) {
-    retryTimer.stop();
+    failedAttempts = 0;
     // The failure path already logs ("No sound server found yet...",
     // "Could not connect..."); this is its silent counterpart's fix --
     // without it, a successful (re)connect produces no log output at
     // all, making it impossible to tell from the log alone whether a
     // retry (automatic or client-triggered) ever actually succeeded.
     vlog.info("Sound server connection established");
+    return;
   }
+
+  // Only the first failure in a row is an error: the sound server can
+  // be away for hours (e.g. no login session and no lingering), and a
+  // line every audioCaptureRetryMs would flood the log.
+  if (failedAttempts == 0)
+    vlog.error("%s", connectError.c_str());
+  else
+    vlog.debug("%s", connectError.c_str());
+  failedAttempts++;
 }
 
 void AudioCapturePulse::handleTimeout(core::Timer* t)
@@ -199,15 +214,25 @@ void AudioCapturePulse::handleTimeout(core::Timer* t)
   // blockHandler()) -- never from the PulseAudio mainloop thread,
   // which is what makes it safe to touch available/retryTimer here
   // with no extra locking, same as every other non-static method on
-  // this class.
+  // this class. lost is the exception: contextStateCallback() sets it
+  // on the mainloop thread, hence atomic.
+  t->repeat();
+
+  if (available && !lost)
+    return;
+
+  if (available) {
+    vlog.info("Will try to reconnect to the sound server every %ums",
+              audioCaptureRetryMs);
+    available = false;
+  }
+
   attemptConnect();
-  if (!available)
-    t->repeat();
 }
 
 void AudioCapturePulse::retryNow()
 {
-  if (available)
+  if (encoder == nullptr || (available && !lost))
     return;
 
   auto sinceLast = std::chrono::steady_clock::now() - lastAttemptTime;
@@ -220,8 +245,6 @@ void AudioCapturePulse::retryNow()
   }
 
   attemptConnect();
-  if (!available)
-    retryTimer.start(audioCaptureRetryMs);
 }
 
 bool AudioCapturePulse::connect()
@@ -232,6 +255,18 @@ bool AudioCapturePulse::connect()
   bool ready;
 
   teardown();
+
+  // A lost connection can leave clients mid-playback; with the
+  // mainloop thread gone, the streaming state is ours to touch
+  if (streaming) {
+    streaming = false;
+    if (onEnd_)
+      onEnd_();
+  }
+  silentFragments = 0;
+  pcmAccum.clear();
+
+  connectError = "Could not connect to sound server";
 
   mainloop = pa_threaded_mainloop_new();
   if (mainloop == nullptr)
@@ -265,8 +300,8 @@ bool AudioCapturePulse::connect()
 
   if (pa_context_connect(context, nullptr,
                          PA_CONTEXT_NOAUTOSPAWN, nullptr) < 0) {
-    vlog.error("Could not connect to sound server: %s",
-               pa_strerror(pa_context_errno(context)));
+    connectError = std::string("Could not connect to sound server: ") +
+                   pa_strerror(pa_context_errno(context));
     pa_threaded_mainloop_unlock(mainloop);
     return false;
   }
@@ -285,13 +320,13 @@ bool AudioCapturePulse::connect()
       break;
     }
     if (!PA_CONTEXT_IS_GOOD(state)) {
-      vlog.error("Could not connect to sound server: %s",
-                 pa_strerror(pa_context_errno(context)));
+      connectError = std::string("Could not connect to sound server: ") +
+                     pa_strerror(pa_context_errno(context));
       ready = false;
       break;
     }
     if (timedOut) {
-      vlog.error("Timed out connecting to sound server");
+      connectError = "Timed out connecting to sound server";
       ready = false;
       break;
     }
@@ -424,9 +459,12 @@ void AudioCapturePulse::contextStateCallback(pa_context* context,
 {
   AudioCapturePulse* self = (AudioCapturePulse*)userdata;
 
-  if (self->available &&
-      (pa_context_get_state(context) == PA_CONTEXT_FAILED))
-    vlog.error("Lost connection to sound server");
+  if (pa_context_get_state(context) == PA_CONTEXT_FAILED) {
+    if (self->available)
+      vlog.error("Lost connection to sound server");
+    // Picked up by handleTimeout() on the main thread
+    self->lost = true;
+  }
 
   pa_threaded_mainloop_signal(self->mainloop, 0);
 }

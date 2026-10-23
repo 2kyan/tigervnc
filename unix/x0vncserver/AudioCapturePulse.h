@@ -19,6 +19,7 @@
 #ifndef __AUDIOCAPTUREPULSE_H__
 #define __AUDIOCAPTUREPULSE_H__
 
+#include <atomic>
 #include <chrono>
 #include <functional>
 #include <string>
@@ -70,7 +71,10 @@
  * (e.g. this server started before PulseAudio/PipeWire did, a real
  * scenario on a freshly-provisioned VM), this keeps retrying
  * automatically on a timer (see audioCaptureRetryMs) rather than
- * giving up forever. retryNow() is also exposed as an immediate,
+ * giving up forever. The timer keeps running while connected, so a
+ * lost connection (e.g. PipeWire stopping with the user's last login
+ * session, without lingering) is retried the same way, and capture
+ * resumes on whatever the default sink is by then. retryNow() is also exposed as an immediate,
  * on-demand retry -- wired to fire whenever a client (re-)enables
  * audio, so toggling mute off/on is a free manual "try again right
  * now" trigger instead of waiting for the next periodic attempt (see
@@ -98,7 +102,7 @@ public:
   bool isAvailable() const { return available; }
 
   // Requests an immediate reconnect attempt if not currently
-  // available; a cheap no-op otherwise, including when called too
+  // available (or the connection was lost); a cheap no-op otherwise, including when called too
   // soon after a previous attempt (see manualRetryMinIntervalMs in the
   // .cxx). See class comment.
   void retryNow();
@@ -111,7 +115,7 @@ private:
   // starts from a clean slate instead of leaking the previous attempt's
   // mainloop/context).
   void teardown();
-  // Wraps connect(), arming/disarming retryTimer around it. Called
+  // Wraps connect(), logging the outcome and counting failures. Called
   // from the constructor, from handleTimeout() (periodic retry), and
   // from retryNow() (manual retry) -- always from the main server
   // thread, never from the PulseAudio mainloop thread (see
@@ -145,6 +149,13 @@ private:
   EndCallback onEnd_;
 
   bool available, opened, timedOut;
+  // Set on the mainloop thread when an established connection fails;
+  // handled on the main thread by handleTimeout()
+  std::atomic<bool> lost;
+  // Consecutive failed connect attempts, and why the last one failed
+  // -- see attemptConnect()
+  unsigned failedAttempts;
+  std::string connectError;
 
   pa_threaded_mainloop* mainloop;
   pa_context* context;
@@ -160,8 +171,9 @@ private:
   OpusEncoder* encoder;
   std::vector<uint8_t> pcmAccum;
 
-  // Drives automatic reconnect attempts while unavailable -- see class
-  // comment and attemptConnect().
+  // Drives automatic reconnect attempts while unavailable, and checks
+  // for a lost connection while available -- see class comment and
+  // handleTimeout().
   core::Timer retryTimer;
 
   // Debounces retryNow(): a client can trigger it on every mute

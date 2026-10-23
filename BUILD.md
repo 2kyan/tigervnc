@@ -107,12 +107,12 @@ a sound server with a sink. On a machine without sound hardware:
 scripts/setup-audio.sh           # as your normal user, not sudo
 ```
 
-This enables lingering (so the sound server survives SSH logout),
-starts PipeWire if it is installed but not running (PulseAudio only on
-machines without PipeWire), and creates a `virtual_speaker` null sink
-as the default. Start order doesn't matter: the
-servers retry every 5 seconds. See `AUDIO.md` for details and
-troubleshooting.
+This starts PipeWire if it is installed but not running (PulseAudio
+only on machines without PipeWire), and creates a `virtual_speaker`
+null sink as the default. Start order doesn't matter: the servers retry
+every 5 seconds, also after losing the sound server. `LINGER=1` also
+enables lingering, so the sound server keeps running after SSH logout.
+See `AUDIO.md` for details and troubleshooting.
 
 ## Windows viewer (cross-built on Linux)
 

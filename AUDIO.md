@@ -26,8 +26,11 @@ microphone). The implementation lives in
 4. Encoded frames are handed from PulseAudio's thread to the server's
    main thread and sent to every client that requested audio.
 5. If no sound server is reachable, the server keeps running video-only
-   and retries every 5 seconds. A client re-enabling audio also triggers
-   an immediate retry (at most once per second).
+   and retries every 5 seconds. The same happens when the connection is
+   lost later, e.g. when PipeWire stops and starts again: capture resumes
+   within 5 seconds of the sound server coming back, on whatever the
+   default sink is by then. A client re-enabling audio also triggers an
+   immediate retry (at most once per second).
 
 Audio only reaches viewers that support the extension: a `vncviewer`
 built with Opus, or the mobile clients.
@@ -87,7 +90,8 @@ same (normal) user that runs the VNC server, **not** as root, because
 PulseAudio is a per-user daemon:
 
 ```sh
-# Keep the user's services (and PulseAudio) alive after SSH logout
+# Keep the user's services (and PulseAudio) alive after SSH logout;
+# see "Without lingering" below
 sudo loginctl enable-linger "$USER"
 
 # Install and start PulseAudio if no sound server is running yet
@@ -148,6 +152,30 @@ set-default-sink virtual_speaker
 
 Startup order does not matter: if the VNC server starts before the sound
 server, it picks it up on its next retry (within 5 seconds).
+
+### Without lingering
+
+PipeWire and PulseAudio run as the user's systemd services, and without
+lingering systemd stops those when the user's last login session ends.
+A VNC viewer connection is not a login session. So if you start the VNC
+server with `vncserver` from an SSH login and then log out, the VNC
+desktop keeps running but has no sound until you log in again. The VNC
+server then reconnects by itself within 5 seconds; nothing needs
+restarting.
+
+To have sound without any other login, either enable lingering, or run
+the VNC server as a systemd service, which opens its own login session
+and so keeps the user's services running for as long as the VNC session
+does:
+
+```sh
+# Map display :1 to your user, then start it as a service
+echo ":1=$USER" | sudo tee -a /etc/tigervnc/vncserver.users
+sudo systemctl enable --now tigervncserver@:1
+```
+
+(Stop a `vncserver`-started session on that display first, with
+`vncserver -kill :1`.)
 
 ### Switching the output sink
 
@@ -215,5 +243,5 @@ switches to the new default sink's monitor on its own and logs
 | Log keeps saying "No sound server found" | The server runs as a different user, or without the session environment (`XDG_RUNTIME_DIR` unset, e.g. started from cron or `sudo`). Run it as the user that owns the sound server, inside a proper login session. |
 | "Could not determine default sink" | No sink exists. Create the null sink as shown above. |
 | Connected but silent | Applications play to a sink other than the default. Check with `pactl list sink-inputs short` and move them with `pactl move-sink-input <id> virtual_speaker`. |
-| Audio stops after SSH logout | Lingering is not enabled; run `sudo loginctl enable-linger "$USER"`. |
+| Audio stops after SSH logout | Lingering is not enabled, so the sound server stopped with the last login session. Sound returns within 5 seconds of the next login; see "Without lingering" for how to avoid the gap. |
 | No audio with an older viewer | The viewer does not support the TigerVNC-native extension (built without Opus, or a stock TigerVNC viewer). |

@@ -7,15 +7,19 @@
 #
 # Run as your normal user, not root: PulseAudio is a per-user daemon,
 # and the VNC server must run as the same user. The steps that need
-# privilege (enabling lingering, installing packages) use sudo.
+# privilege (installing packages, enabling lingering) use sudo.
 #
 # On systems that already run PipeWire's pipewire-pulse (or PulseAudio),
 # this only adds the null sink and makes it the default. If PipeWire is
 # installed but not running, its user services are started; PulseAudio
 # is only installed when there is no PipeWire.
 #
-# Lingering keeps the user's services, and with them the sound server,
-# alive after the last login session (e.g. SSH) ends.
+# Lingering is left alone unless LINGER=1. It keeps the user's services,
+# and with them the sound server, alive after the last login session
+# (e.g. SSH) ends. Without it, sound pauses while nobody is logged in
+# and the VNC servers reconnect once the sound server is back; running
+# the VNC server as the tigervncserver@ service avoids the pause too
+# (see AUDIO.md, "Without lingering").
 #
 # Start order doesn't matter: the VNC servers retry connecting to the
 # sound server every 5 seconds.
@@ -29,9 +33,11 @@
 # permanent.
 #
 # Usage: scripts/setup-audio.sh
+#        LINGER=1 scripts/setup-audio.sh
 set -euo pipefail
 
 SINK_NAME="${SINK_NAME:-virtual_speaker}"
+LINGER="${LINGER:-0}"
 
 if [ "$(id -u)" -eq 0 ]; then
   echo "Run this as your normal user, not root/sudo; it uses sudo itself" >&2
@@ -39,7 +45,7 @@ if [ "$(id -u)" -eq 0 ]; then
   exit 1
 fi
 
-if command -v loginctl >/dev/null 2>&1; then
+if [ "$LINGER" = "1" ] && command -v loginctl >/dev/null 2>&1; then
   echo "==> enabling lingering for $USER (keeps the sound server alive after logout)"
   sudo loginctl enable-linger "$USER"
 fi
