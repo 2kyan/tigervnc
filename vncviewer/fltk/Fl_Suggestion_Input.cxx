@@ -25,6 +25,10 @@
 #include <sstream>
 #include <algorithm>
 
+#if defined(WIN32)
+#include <windows.h>
+#endif
+
 #include <FL/fl_draw.H>
 #include <FL/Fl.H>
 #include <FL/Fl_Widget.H>

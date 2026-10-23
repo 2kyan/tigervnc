@@ -29,7 +29,8 @@ feature, such as audio in the mobile apps, only exists on `dev`. See
       screen scale (`vncviewer/Surface_X11.cxx`)
 - [x] HiDPI: convert window geometry to FLTK's scaled units
       (`vncviewer/x11.cxx`)
-- [ ] macOS and Windows builds with FLTK 1.4
+- [x] Windows build with FLTK 1.4 (cross-built, `scripts/build-windows.sh`)
+- [ ] macOS build with FLTK 1.4
 
 ## Audio extension (`audio-extension`)
 
@@ -55,7 +56,8 @@ Servers:
 
 Viewer:
 - [x] Opus decoding in `vncviewer` (Linux, PulseAudio output)
-- [ ] Windows viewer with Opus (waveOut output)
+- [ ] Windows viewer with Opus (waveOut output): builds
+      (`scripts/build-windows.sh`), not run on Windows yet
 - [ ] macOS audio playback (not supported upstream either)
 
 Build:
@@ -65,7 +67,7 @@ Build:
       (`dev` uses the bundled FLTK 1.4, `audio-extension` the system FLTK 1.3)
 - [x] `AUDIO.md`: server-side audio setup
 - [x] `scripts/setup-audio.sh`: sound server and null sink for headless
-      machines (`dev` only)
+      machines
 
 Testing:
 - [x] All targets build with audio on and off (Linux)
@@ -131,6 +133,9 @@ Mobile audio (needs both the audio extension and the mobile viewer):
 Build tooling:
 - [x] `BUILD.md`: building everything in this tree
 - [x] `scripts/install-deps.sh`: apt packages for all Linux builds
+- [x] `scripts/build-windows.sh`: Windows viewer cross-built with
+      MinGW-w64 in a Fedora container, copied with its DLLs to
+      `bin/windows/`
 - [x] Build scripts copy binaries to `bin/` under TigerVNC's Debian
       package names (`xtigervncviewer`, `x0tigervncserver`,
       `Xtigervnc`, ...)

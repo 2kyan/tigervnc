@@ -3,8 +3,9 @@
 The `dev` branch builds these from one tree, using the scripts in
 `scripts/`:
 
-- **Clients:** `vncviewer` (desktop, with the bundled FLTK 1.4), and the
-  Android and iOS apps in `mobile/`.
+- **Clients:** `vncviewer` (desktop, with the bundled FLTK 1.4; the
+  Windows build is cross-compiled on Linux), and the Android and iOS
+  apps in `mobile/`.
 - **Servers:** `x0vncserver`, `w0vncserver` and `Xvnc`.
 
 All of them support the TigerVNC-native audio extension. See `AUDIO.md`
@@ -15,6 +16,7 @@ for upstream's generic build instructions.
 |---|---|---|
 | Linux build dependencies (apt) | `scripts/install-deps.sh` | no |
 | `vncviewer` | `scripts/build-viewer.sh` | yes |
+| `vncviewer.exe` (Windows, cross-built) | `scripts/build-windows.sh` | builds; not run on Windows yet |
 | `x0vncserver`, `w0vncserver`, `Xvnc` | `scripts/build-server.sh` | yes |
 | Audio setup (sound server + null sink) | `scripts/setup-audio.sh` | no |
 | Android app | `scripts/build-android.sh` | yes |
@@ -25,7 +27,8 @@ location.
 
 ## Settings
 
-The desktop scripts (`build-viewer.sh`, `build-server.sh`) share these
+The desktop scripts (`build-viewer.sh`, `build-server.sh`,
+`build-windows.sh`) share these
 environment variables, defined in `scripts/common.sh`:
 
 | Variable | Default | Meaning |
@@ -34,7 +37,7 @@ environment variables, defined in `scripts/common.sh`:
 | `ENABLE_AUDIO` | `AUTO` | `AUTO`, `ON` or `OFF`; `OFF` drops libopus and PulseAudio |
 | `JOBS` | number of CPUs | Parallel build jobs |
 | `CMAKE_ARGS` | | Extra arguments for CMake |
-| `BUILD_DIR` | `build-viewer` / `build-server` | Build directory |
+| `BUILD_DIR` | `build-viewer` / `build-server` / `build-win64` | Build directory |
 | `BIN_DIR` | `bin` | Where finished binaries are copied |
 | `INSTALL_BIN` | `1` | Set to `0` to skip copying to `BIN_DIR` |
 
@@ -105,11 +108,28 @@ scripts/setup-audio.sh           # as your normal user, not sudo
 ```
 
 This enables lingering (so the sound server survives SSH logout),
-starts PulseAudio if no PulseAudio-compatible server is running, and
-creates a `virtual_speaker` null sink as the default. With PipeWire
-already running, it only adds the sink. Start order doesn't matter: the
+starts PipeWire if it is installed but not running (PulseAudio only on
+machines without PipeWire), and creates a `virtual_speaker` null sink
+as the default. Start order doesn't matter: the
 servers retry every 5 seconds. See `AUDIO.md` for details and
 troubleshooting.
+
+## Windows viewer (cross-built on Linux)
+
+```sh
+scripts/build-windows.sh
+```
+
+This builds a 64-bit `vncviewer.exe` with MinGW-w64 inside a Fedora
+container, because Fedora packages MinGW builds of every library the
+viewer needs (FLTK 1.4, GnuTLS, libjpeg-turbo, pixman, zlib, Opus) and
+Debian/Ubuntu don't. It needs Podman or Docker; set `CONTAINER` to
+choose. The container image (`tigervnc-mingw64`) is built on first use;
+remove it to pick up newer packages.
+
+The result goes to `bin/windows/`: `vncviewer.exe` plus the MinGW DLLs
+it needs. Copy the whole directory to the Windows machine. Audio plays
+through waveOut, with Opus decoding for the TigerVNC-native extension.
 
 ## Android
 
