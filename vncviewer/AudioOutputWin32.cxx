@@ -169,29 +169,27 @@ void AudioOutputWin32::addSilence(size_t samples)
 
 void AudioOutputWin32::addSamples(const uint8_t* samples, size_t length)
 {
-  size_t maxPending;
+  size_t maxQueued, queued;
 
   // A partial sample is of no use to anyone, and would put every
   // channel after it in the wrong place
   length -= length % getSampleSize();
 
-  // Anything still waiting here is already late, so after a stall
-  // (network, or this process not running) we keep only the newest
-  // audio and get back to live, rather than playing through everything
-  // that piled up in the meantime
-  maxPending = audioMaxJitterMs * audioFrequency / 1000 * getSampleSize();
-  if (length > maxPending) {
-    samples += length - maxPending;
-    length = maxPending;
-  }
-  if (pendingSize + length > maxPending) {
-    size_t excess = pendingSize + length - maxPending;
+  // Don't let a burst after a stall (network, or this process not
+  // running) queue up more than we would ever buffer on purpose, or we
+  // stay that far behind for the rest of the stream. Everything not yet
+  // played counts, as the device plays straight out of our buffer: the
+  // part it already has as well as what is still to be handed over.
+  // That also means we cannot skip ahead past the oldest, so it is the
+  // newest that goes.
+  maxQueued = audioMaxJitterMs * audioFrequency / 1000 * getSampleSize();
+  queued = bufferSize - bufferFree;
+  if (queued + length > maxQueued) {
+    size_t keep = queued < maxQueued ? maxQueued - queued : 0;
 
-    vlog.debug("Audio too far behind, discarding %d bytes", (int)excess);
-
-    writtenHead = (writtenHead + excess) & (bufferSize - 1);
-    pendingSize -= excess;
-    bufferFree += excess;
+    vlog.debug("Audio too far behind, discarding %d bytes",
+               (int)(length - keep));
+    length = keep;
   }
 
   while (length > 0) {
@@ -372,6 +370,10 @@ void AudioOutputWin32::play(const uint8_t* samples, size_t length)
 {
   if (!opened)
     return;
+
+  // Take back what the device has finished with first, so that
+  // addSamples() sees how much is really still queued
+  submit();
 
   addSamples(samples, length);
   submit();
