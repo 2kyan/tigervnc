@@ -122,6 +122,20 @@ configure_xserver()
 
 if [ "$CLEAN_XVNC" = "1" ] || [ ! -f "$XSERVER_DIR/Makefile" ]; then
   prepare_xserver
+else
+  # The Xvnc sources are copied into the X.Org tree, so bring over
+  # whatever changed since the last run or make won't see it. Compare
+  # contents rather than timestamps, as a git checkout can make a file
+  # older than its copy. A change to hw/vnc/Makefile.am still needs
+  # CLEAN_XVNC=1.
+  log "updating Xvnc sources in $XSERVER_DIR"
+  (cd "$ROOT_DIR/unix/xserver" && find . -type f) | while read -r f; do
+    if ! cmp -s "$ROOT_DIR/unix/xserver/$f" "$XSERVER_DIR/$f"; then
+      mkdir -p "$(dirname "$XSERVER_DIR/$f")"
+      cp "$ROOT_DIR/unix/xserver/$f" "$XSERVER_DIR/$f"
+      echo "    ${f#./}"
+    fi
+  done
 fi
 
 log "building Xvnc"

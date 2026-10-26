@@ -221,6 +221,7 @@ namespace rfb {
     bool clientHasCursor;
 
     bool audioEnabled_;
+    unsigned audioFramesDropped;
 
     std::string closeReason;
   };
