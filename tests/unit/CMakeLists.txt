@@ -23,6 +23,10 @@ add_executable(conv conv.cxx)
 target_link_libraries(conv rfb GTest::gtest_main)
 gtest_discover_tests(conv)
 
+add_executable(congestion congestion.cxx)
+target_link_libraries(congestion rfb GTest::gtest_main)
+gtest_discover_tests(congestion)
+
 add_executable(convertlf convertlf.cxx)
 target_link_libraries(convertlf core GTest::gtest_main)
 gtest_discover_tests(convertlf)

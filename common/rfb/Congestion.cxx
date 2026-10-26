@@ -38,6 +38,7 @@
 #endif
 
 #include <assert.h>
+#include <stdint.h>
 #include <string.h>
 #include <sys/time.h>
 
@@ -135,7 +136,7 @@ void Congestion::updatePosition(unsigned pos)
   // (we cannot do this until we have a RTT measurement though)
   if (baseRTT != (unsigned)-1) {
     extraBuffer += delta;
-    consumed = core::msBetween(&lastUpdate, &now) * congWindow / baseRTT;
+    consumed = (uint64_t)core::msBetween(&lastUpdate, &now) * congWindow / baseRTT;
     if (extraBuffer < consumed)
       extraBuffer = 0;
     else
@@ -191,7 +192,7 @@ void Congestion::gotPong()
     return;
 
   // Estimate added delay because of overtaxed buffers (see above)
-  delay = rttInfo.extra * baseRTT / congWindow;
+  delay = (uint64_t)rttInfo.extra * baseRTT / congWindow;
   if (delay < rtt)
     rtt -= delay;
   else
@@ -273,9 +274,9 @@ int Congestion::getUncongestedETA()
 
     etaNext = core::msBetween(&prevPing->tv, &curPing.tv);
     // Compensate for buffering delays
-    delay = curPing.extra * baseRTT / congWindow;
+    delay = (uint64_t)curPing.extra * baseRTT / congWindow;
     etaNext += delay;
-    delay = prevPing->extra * baseRTT / congWindow;
+    delay = (uint64_t)prevPing->extra * baseRTT / congWindow;
     if (delay >= etaNext)
       etaNext = 0;
     else
@@ -283,7 +284,7 @@ int Congestion::getUncongestedETA()
 
     // Found it?
     if (isAfter(curPing.pos, targetAcked)) {
-      eta += etaNext * (curPing.pos - targetAcked) / (curPing.pos - prevPing->pos);
+      eta += (uint64_t)etaNext * (curPing.pos - targetAcked) / (curPing.pos - prevPing->pos);
       if (elapsed > eta)
         return 0;
       else
@@ -353,7 +354,7 @@ unsigned Congestion::getExtraBuffer()
     return 0;
 
   elapsed = core::msSince(&lastUpdate);
-  consumed = elapsed * congWindow / baseRTT;
+  consumed = (uint64_t)elapsed * congWindow / baseRTT;
 
   if (consumed >= extraBuffer)
     return 0;
@@ -394,9 +395,9 @@ unsigned Congestion::getInFlight()
 
   etaNext = core::msBetween(&lastPong.tv, &nextPong.tv);
   // Compensate for buffering delays
-  delay = nextPong.extra * baseRTT / congWindow;
+  delay = (uint64_t)nextPong.extra * baseRTT / congWindow;
   etaNext += delay;
-  delay = lastPong.extra * baseRTT / congWindow;
+  delay = (uint64_t)lastPong.extra * baseRTT / congWindow;
   if (delay >= etaNext)
     etaNext = 0;
   else
@@ -410,7 +411,7 @@ unsigned Congestion::getInFlight()
     acked = nextPong.pos;
   else {
     acked = lastPong.pos;
-    acked += (nextPong.pos - lastPong.pos) * elapsed / etaNext;
+    acked += (uint64_t)(nextPong.pos - lastPong.pos) * elapsed / etaNext;
   }
 
   return lastPosition - acked;
