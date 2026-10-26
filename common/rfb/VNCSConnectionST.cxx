@@ -74,7 +74,8 @@ VNCSConnectionST::VNCSConnectionST(VNCServerST* server_, network::Socket *s,
     losslessTimer(this), server(server_),
     updateRenderedCursor(false), removeRenderedCursor(false),
     continuousUpdates(false), encodeManager(this), idleTimer(this),
-    pointerEventTime(0), clientHasCursor(false), audioEnabled_(false)
+    pointerEventTime(0), clientHasCursor(false), audioEnabled_(false),
+    audioFramesDropped(0)
 {
   socketTimer.start(core::secsToMillis(LOGIN_GRACE_TIME));
 
@@ -309,6 +310,9 @@ void VNCSConnectionST::bellOrClose()
 
 void VNCSConnectionST::writeAudioBeginOrClose()
 {
+  // Each stream gets its own drop count (see writeAudioDataOrClose())
+  audioFramesDropped = 0;
+
   try {
     if (state() == RFBSTATE_NORMAL) writer()->writeAudioBegin();
   } catch(std::exception& e) {
@@ -319,7 +323,31 @@ void VNCSConnectionST::writeAudioBeginOrClose()
 void VNCSConnectionST::writeAudioDataOrClose(const uint8_t* data, size_t length)
 {
   try {
-    if (state() == RFBSTATE_NORMAL) writer()->writeAudioData(data, length);
+    if (state() != RFBSTATE_NORMAL)
+      return;
+
+    // Audio bypasses the congestion control framebuffer updates go
+    // through, so it must not add to a backlog: if earlier data is
+    // still stuck in our send buffer, writing more would keep that
+    // buffer from ever draining, which in turn keeps isCongested()
+    // true and the screen frozen while audio keeps playing. Stale
+    // audio is useless anyway, so drop frames until the client has
+    // caught up.
+    sock->outStream().flush();
+    if (sock->outStream().hasBufferedData()) {
+      if (audioFramesDropped++ == 0)
+        vlog.debug("Client %s is congested, dropping audio",
+                   peerEndpoint.c_str());
+      return;
+    }
+
+    if (audioFramesDropped != 0) {
+      vlog.debug("Client %s caught up, resuming audio after dropping "
+                 "%u frames", peerEndpoint.c_str(), audioFramesDropped);
+      audioFramesDropped = 0;
+    }
+
+    writer()->writeAudioData(data, length);
   } catch(std::exception& e) {
     close(e.what());
   }

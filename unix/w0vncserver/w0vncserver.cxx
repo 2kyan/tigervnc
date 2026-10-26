@@ -22,6 +22,7 @@
 
 #include <assert.h>
 
+#include <algorithm>
 #include <deque>
 #include <mutex>
 #include <vector>
@@ -33,6 +34,7 @@
 #include <network/TcpSocket.h>
 #include <network/UnixSocket.h>
 #include <rfb/VNCServerST.h>
+#include <rfb/audioTypes.h>
 #include <rfb/ServerCore.h>
 #include <rdr/FdOutStream.h>
 #include <core/Logger_stdio.h>
@@ -139,6 +141,11 @@ public:
   void onData(const uint8_t* data, size_t length)
   {
     std::lock_guard<std::mutex> lock(mutex);
+    // Main thread fell behind? Drop the oldest frame rather than let
+    // stale audio pile up (see rfb::audioMaxQueuedFrames).
+    if ((unsigned)std::count_if(events.begin(), events.end(), isData) >=
+        rfb::audioMaxQueuedFrames)
+      events.erase(std::find_if(events.begin(), events.end(), isData));
     events.push_back({Event::Data, std::vector<uint8_t>(data, data + length)});
   }
   void onEnd()
@@ -152,6 +159,8 @@ private:
     enum Kind { Begin, Data, End } kind;
     std::vector<uint8_t> data;
   };
+
+  static bool isData(const Event& e) { return e.kind == Event::Data; }
 
   void handleTimeout(core::Timer* t) override
   {

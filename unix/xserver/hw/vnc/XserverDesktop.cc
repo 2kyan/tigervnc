@@ -24,6 +24,7 @@
 #include <config.h>
 
 #include <assert.h>
+#include <algorithm>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -46,6 +47,7 @@
 
 #include <rfb/VNCServerST.h>
 #include <rfb/ServerCore.h>
+#include <rfb/audioTypes.h>
 
 #include "XserverDesktop.h"
 #include "vncBlockHandler.h"
@@ -599,7 +601,15 @@ void XserverDesktop::audioCaptureBegin()
 
 void XserverDesktop::audioCaptureData(const uint8_t* pcm, size_t length)
 {
+  auto isData = [](const AudioEvent& e) { return e.kind == AudioEvent::Data; };
+
   std::lock_guard<std::mutex> lock(audioMutex);
+  // Main thread fell behind? Drop the oldest frame rather than let
+  // stale audio pile up (see rfb::audioMaxQueuedFrames).
+  if ((unsigned)std::count_if(audioEvents.begin(), audioEvents.end(),
+                              isData) >= rfb::audioMaxQueuedFrames)
+    audioEvents.erase(std::find_if(audioEvents.begin(), audioEvents.end(),
+                                   isData));
   audioEvents.push_back({AudioEvent::Data, std::vector<uint8_t>(pcm, pcm + length)});
 }
 

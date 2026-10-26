@@ -73,5 +73,11 @@ namespace rfb {
   const int audioOpusFrameSamples = 960; // 20ms @ 48000 Hz, per channel
   const int audioOpusBitrate = 64000; // bits/sec -- see this header's
                                       // top comment for the tradeoff
+
+  // Most encoded frames the servers' capture-to-main-thread handoff
+  // queues will hold (25 x 20ms = 500ms). Late audio is worthless, so
+  // if the main thread falls behind the oldest frames are dropped
+  // rather than piling up and being dumped on the clients in a burst.
+  const unsigned audioMaxQueuedFrames = 25;
 }
 #endif
