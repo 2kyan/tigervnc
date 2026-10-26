@@ -284,9 +284,17 @@ int Congestion::getUncongestedETA()
 
     // Found it?
     if (isAfter(curPing.pos, targetAcked)) {
-      eta += (uint64_t)etaNext * (curPing.pos - targetAcked) / (curPing.pos - prevPing->pos);
-      if (elapsed > eta)
-        return 0;
+      // Interpolate like getInFlight() does: acked moves from
+      // prevPing->pos to curPing.pos over etaNext, so we need the time
+      // to cover targetAcked - prevPing->pos of that. Round up, so we
+      // are not woken a millisecond too early.
+      eta += (uint64_t)etaNext * (targetAcked - prevPing->pos) /
+             (curPing.pos - prevPing->pos) + 1;
+      // Still congested past the estimate means we are waiting for a
+      // late pong, and its arrival will trigger the next update. Saying
+      // 0 here would have the caller busy-loop until then.
+      if (elapsed >= eta)
+        return -1;
       else
         return eta - elapsed;
     }

@@ -75,6 +75,40 @@ TEST(Congestion, staticScreen)
   }
 }
 
+// While a large update drains, the ETA must never be 0, as the caller
+// re-arms its timer with it and would busy-loop until uncongested
+TEST(Congestion, largeUpdateEta)
+{
+  for (int pongDelay : { 0, 300 }) {
+    rfb::Congestion congestion;
+    unsigned pos;
+
+    pos = warmUp(&congestion);
+
+    // As in VNCSConnectionST::writeDataUpdate(): ping, update, ping.
+    // 1 MB at 2 MB/s with a 10 ms round trip, the first pong possibly
+    // late.
+    congestion.sentPing();
+    pos += 1000000;
+    congestion.updatePosition(pos);
+    congestion.sentPing();
+
+    for (int t = 1; t <= 1000; t++) {
+      advance(1);
+      if (t == 10 + pongDelay)
+        congestion.gotPong();
+      if (t == 510)
+        congestion.gotPong();
+      congestion.updatePosition(pos);
+      if (congestion.isCongested())
+        EXPECT_NE(congestion.getUncongestedETA(), 0)
+          << "at " << t << " ms, pong delay " << pongDelay << " ms";
+    }
+
+    EXPECT_FALSE(congestion.isCongested());
+  }
+}
+
 // Data that isn't followed by pings (e.g. audio) while the screen is
 // static used to overflow the in-flight estimate after ~20 seconds,
 // reporting congestion with an ETA of 0 forever
