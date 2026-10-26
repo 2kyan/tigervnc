@@ -169,9 +169,30 @@ void AudioOutputWin32::addSilence(size_t samples)
 
 void AudioOutputWin32::addSamples(const uint8_t* samples, size_t length)
 {
+  size_t maxPending;
+
   // A partial sample is of no use to anyone, and would put every
   // channel after it in the wrong place
   length -= length % getSampleSize();
+
+  // Anything still waiting here is already late, so after a stall
+  // (network, or this process not running) we keep only the newest
+  // audio and get back to live, rather than playing through everything
+  // that piled up in the meantime
+  maxPending = audioMaxJitterMs * audioFrequency / 1000 * getSampleSize();
+  if (length > maxPending) {
+    samples += length - maxPending;
+    length = maxPending;
+  }
+  if (pendingSize + length > maxPending) {
+    size_t excess = pendingSize + length - maxPending;
+
+    vlog.debug("Audio too far behind, discarding %d bytes", (int)excess);
+
+    writtenHead = (writtenHead + excess) & (bufferSize - 1);
+    pendingSize -= excess;
+    bufferFree += excess;
+  }
 
   while (length > 0) {
     size_t chunk = length;
@@ -181,8 +202,7 @@ void AudioOutputWin32::addSamples(const uint8_t* samples, size_t length)
     if (chunk > bufferSize - pendingHead)
       chunk = bufferSize - pendingHead;
     if (chunk == 0) {
-      // We are further behind than the buffer is long, so the samples
-      // we are dropping are ones we could never have played in time
+      // Whatever is left belongs to samples the device still has queued
       vlog.debug("Audio buffer full, discarding %d bytes", (int)length);
       break;
     }

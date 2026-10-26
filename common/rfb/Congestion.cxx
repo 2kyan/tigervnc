@@ -231,6 +231,14 @@ bool Congestion::isCongested()
   return true;
 }
 
+int Congestion::getPingAge()
+{
+  if (pings.empty())
+    return -1;
+
+  return core::msSince(&pings.front().tv);
+}
+
 int Congestion::getUncongestedETA()
 {
   unsigned targetAcked;
