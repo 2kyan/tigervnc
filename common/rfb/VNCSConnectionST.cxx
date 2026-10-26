@@ -44,6 +44,7 @@
 #include <rfb/SMsgWriter.h>
 #include <rfb/VNCServerST.h>
 #include <rfb/VNCSConnectionST.h>
+#include <rfb/audioTypes.h>
 #include <rfb/encodings.h>
 #include <rfb/screenTypes.h>
 #include <rfb/fenceTypes.h>
@@ -322,6 +323,8 @@ void VNCSConnectionST::writeAudioBeginOrClose()
 
 void VNCSConnectionST::writeAudioDataOrClose(const uint8_t* data, size_t length)
 {
+  int pingAge;
+
   try {
     if (state() != RFBSTATE_NORMAL)
       return;
@@ -330,11 +333,15 @@ void VNCSConnectionST::writeAudioDataOrClose(const uint8_t* data, size_t length)
     // through, so it must not add to a backlog: if earlier data is
     // still stuck in our send buffer, writing more would keep that
     // buffer from ever draining, which in turn keeps isCongested()
-    // true and the screen frozen while audio keeps playing. Stale
+    // true and the screen frozen while audio keeps playing. Nor should
+    // it fill the TCP buffers of a client that has stopped reading, so
+    // also stop once a ping has gone unanswered for too long. Stale
     // audio is useless anyway, so drop frames until the client has
     // caught up.
     sock->outStream().flush();
-    if (sock->outStream().hasBufferedData()) {
+    pingAge = congestion.getPingAge();
+    if (sock->outStream().hasBufferedData() ||
+        (pingAge > (int)audioMaxLatencyMs)) {
       if (audioFramesDropped++ == 0)
         vlog.debug("Client %s is congested, dropping audio",
                    peerEndpoint.c_str());
@@ -348,6 +355,12 @@ void VNCSConnectionST::writeAudioDataOrClose(const uint8_t* data, size_t length)
     }
 
     writer()->writeAudioData(data, length);
+
+    // Framebuffer updates are followed by pings, but audio on a static
+    // screen would otherwise send none, and we would never notice the
+    // client stop answering. Keep one in flight.
+    if (pingAge < 0)
+      writeRTTPing();
   } catch(std::exception& e) {
     close(e.what());
   }

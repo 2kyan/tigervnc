@@ -79,5 +79,12 @@ namespace rfb {
   // if the main thread falls behind the oldest frames are dropped
   // rather than piling up and being dumped on the clients in a burst.
   const unsigned audioMaxQueuedFrames = 25;
+
+  // Longest a server waits for a client to answer a ping before it
+  // stops sending that client audio, as anything sent after that would
+  // already be this late by the time it is played. This is what keeps
+  // a client that has stopped reading (asleep, suspended) from coming
+  // back to minutes of stale audio queued up in TCP buffers.
+  const unsigned audioMaxLatencyMs = 500;
 }
 #endif

@@ -47,6 +47,10 @@ namespace rfb {
     // longer be congested.
     int getUncongestedETA();
 
+    // getPingAge() returns the number of milliseconds the oldest ping
+    // has been waiting for its pong, or -1 if no ping is outstanding.
+    int getPingAge();
+
     // getBandwidth() returns the current bandwidth estimation in bytes
     // per second.
     size_t getBandwidth();
