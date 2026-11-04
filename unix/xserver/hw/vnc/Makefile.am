@@ -46,7 +46,15 @@ nodist_EXTRA_Xvnc_SOURCES = dummy.cxx
 
 Xvnc_CPPFLAGS = $(AM_CPPFLAGS)
 
+# libXvidmode calls into dix/os, so it has to come before them
+VIDMODE_LIBS =
+if XF86VIDMODE
+Xvnc_SOURCES += vncVidMode.h vncVidMode.c
+VIDMODE_LIBS += $(top_builddir)/Xext/libXvidmode.la
+endif
+
 LOCAL_LIBS = \
+	$(VIDMODE_LIBS) \
 	$(XVNC_LIBS) \
 	$(XSERVER_LIBS) \
 	libvnccommon.la \

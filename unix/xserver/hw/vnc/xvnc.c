@@ -39,6 +39,7 @@ from the X Consortium.
 #include "RandrGlue.h"
 #include "vncDRI3.h"
 #include "vncPresent.h"
+#include "vncVidMode.h"
 #include "xorg-version.h"
 #include "i18n.h"
 
@@ -293,6 +294,16 @@ ddxProcessArgument(int argc, char *argv[], int i)
         }
         return ret;
     }
+
+#ifdef XF86VIDMODE
+    /* dix only knows its static extensions, so handle ours here */
+    if (((strcmp(argv[i], "-extension") == 0) ||
+         (strcmp(argv[i], "+extension") == 0)) &&
+        ((i + 1) < argc) && (strcasecmp(argv[i + 1], XF86VIDMODENAME) == 0)) {
+        noXFree86VidModeExtension = (argv[i][0] == '-');
+        return 2;
+    }
+#endif
 
     if (strcmp(argv[i], "+render") == 0) {      /* +render */
         Render = TRUE;
@@ -1123,6 +1134,9 @@ vncClientStateChange(CallbackListPtr *a, void *b, void *c)
 
 static const ExtensionModule vncExtensions[] = {
     {vncExtensionInit, "TIGERVNC", NULL},
+#ifdef XF86VIDMODE
+    {vncVidModeExtensionInit, XF86VIDMODENAME, &noXFree86VidModeExtension},
+#endif
 };
 
 void
