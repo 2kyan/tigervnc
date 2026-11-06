@@ -1,3 +1,8 @@
 <resources>
     <string name="app_name">TigerVNC Viewer</string>
+    <string name="session_notification_channel">VNC session</string>
+    <string name="session_notification_title">Connected to %1$s</string>
+    <string name="session_notification_active">Session active</string>
+    <string name="session_notification_backgrounded">In background – disconnects when the timer runs out</string>
+    <string name="session_notification_disconnect">Disconnect</string>
 </resources>

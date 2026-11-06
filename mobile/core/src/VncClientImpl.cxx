@@ -141,8 +141,11 @@ void VncClientImpl::sendPointerEvent(int x, int y, uint32_t buttonMask)
 {
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    havePendingPointer_ = true;
-    pendingPointer_ = {x, y, buttonMask};
+    if (!pendingPointers_.empty() &&
+        pendingPointers_.back().buttonMask == buttonMask)
+      pendingPointers_.back() = {x, y, buttonMask};
+    else
+      pendingPointers_.push_back({x, y, buttonMask});
   }
   if (wakeWriteFd_ >= 0) {
     char b = 0;
@@ -547,18 +550,17 @@ void VncClientImpl::runThread(std::string host, int port, bool shared)
         bool audioEnabledChangeNow = wantAudioEnabledChange_;
         wantAudioEnabledChange_ = false;
         bool audioEnabledTarget = audioEnabledTarget_;
-        bool pointerPending = havePendingPointer_;
-        havePendingPointer_ = false;
-        OutgoingPointer pointer = pendingPointer_;
+        std::vector<OutgoingPointer> pointers;
+        pointers.swap(pendingPointers_);
         std::vector<OutgoingKey> keys;
         keys.swap(pendingKeys_);
         std::vector<std::string> clips;
         clips.swap(pendingClipboard_);
         lock.unlock();
 
-        if (pointerPending)
-          writer()->writePointerEvent(core::Point(pointer.x, pointer.y),
-                                       static_cast<uint16_t>(pointer.buttonMask));
+        for (const auto& p : pointers)
+          writer()->writePointerEvent(core::Point(p.x, p.y),
+                                       static_cast<uint16_t>(p.buttonMask));
         for (const auto& k : keys) {
           if (k.down)
             sendKeyPress(static_cast<int>(k.keysym), 0, k.keysym);

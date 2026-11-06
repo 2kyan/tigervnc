@@ -1,14 +1,21 @@
 package com.tigervnc.mobile.viewer
 
 import android.view.KeyCharacterMap
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.focusable
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -17,6 +24,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -27,7 +35,13 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
-import androidx.compose.ui.input.pointer.changedToUp
+import androidx.compose.ui.input.pointer.PointerEvent
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.PointerInputChange
+import androidx.compose.ui.input.pointer.PointerType
+import androidx.compose.ui.input.pointer.isPrimaryPressed
+import androidx.compose.ui.input.pointer.isSecondaryPressed
+import androidx.compose.ui.input.pointer.isTertiaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
@@ -68,6 +82,11 @@ fun SessionScreen(bridge: VncBridge) {
     val density = LocalDensity.current
     val focusRequester = remember { FocusRequester() }
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
+    // Session menu: opened by the floating handle, F8, or Back. Back
+    // never leaves/disconnects directly -- Disconnect is a menu item --
+    // so a stray Back gesture can't drop the session.
+    var menuOpen by remember { mutableStateOf(false) }
+    BackHandler { menuOpen = !menuOpen }
     LaunchedEffect(viewSize, bridge.useReadableResize) {
         if (viewSize.width > 0 && viewSize.height > 0) {
             delay(350)
@@ -93,6 +112,14 @@ fun SessionScreen(bridge: VncBridge) {
                 if (event.type != KeyEventType.KeyDown && event.type != KeyEventType.KeyUp) {
                     return@onKeyEvent false
                 }
+                // F8 opens the session menu (same menu key as TigerVNC's
+                // desktop vncviewer) and is not sent to the server.
+                if (event.nativeKeyEvent.keyCode == android.view.KeyEvent.KEYCODE_F8) {
+                    if (event.type == KeyEventType.KeyDown && event.nativeKeyEvent.repeatCount == 0) {
+                        menuOpen = !menuOpen
+                    }
+                    return@onKeyEvent true
+                }
                 val keysym = androidKeyEventToKeysym(event.nativeKeyEvent) ?: return@onKeyEvent false
                 bridge.sendKeyEvent(keysym, event.type == KeyEventType.KeyDown)
                 true
@@ -110,11 +137,30 @@ fun SessionScreen(bridge: VncBridge) {
                             val change = event.changes.firstOrNull() ?: continue
                             // Re-claim keyboard focus on tap, in case a
                             // toggle/disconnect button click stole it.
-                            focusRequester.requestFocus()
+                            if (event.type == PointerEventType.Press) focusRequester.requestFocus()
                             val fit = aspectFit(size.width.toFloat(), size.height.toFloat(), bmp.width, bmp.height)
                             val (fx, fy) = mapToFramebuffer(change.position, fit, bmp.width, bmp.height)
-                            val down = !change.changedToUp()
-                            bridge.sendPointerEvent(fx, fy, if (down) VncButtons.LEFT else 0)
+                            // Send the buttons actually held, not "anything
+                            // but a lift": mouse/trackpad/stylus hover moves,
+                            // Enter/Exit and wheel events have no button
+                            // down and must not be sent as a left press.
+                            val held = vncButtonMask(event, change)
+                            if (event.type == PointerEventType.Scroll) {
+                                // Compose's scrollDelta.y > 0 is wheel-down.
+                                val dy = change.scrollDelta.y
+                                val wheel = when {
+                                    dy < 0f -> VncButtons.WHEEL_UP
+                                    dy > 0f -> VncButtons.WHEEL_DOWN
+                                    else -> 0
+                                }
+                                if (wheel != 0) {
+                                    bridge.sendPointerEvent(fx, fy, held or wheel)
+                                    bridge.sendPointerEvent(fx, fy, held)
+                                }
+                                change.consume()
+                                continue
+                            }
+                            bridge.sendPointerEvent(fx, fy, held)
                         }
                     }
                 },
@@ -137,57 +183,171 @@ fun SessionScreen(bridge: VncBridge) {
             }
         }
 
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(16.dp),
-        ) {
-            Surface(
-                onClick = { bridge.updateUseReadableResize(!bridge.useReadableResize) },
-                shape = MaterialTheme.shapes.small,
-                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
-                modifier = Modifier.size(40.dp),
-            ) {
-                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                    // "Aa" for Readable (dp-based, legible remote UI),
-                    // "1:1" for Sharp (raw pixels, crisper but smaller
-                    // remote UI on a high-density display).
-                    Text(
-                        if (bridge.useReadableResize) "Aa" else "1:1",
-                        style = MaterialTheme.typography.labelSmall,
-                    )
-                }
-            }
+        SessionMenu(
+            bridge = bridge,
+            containerSize = viewSize,
+            menuOpen = menuOpen,
+            onMenuOpenChange = { menuOpen = it },
+        )
+    }
+    // Hand keyboard focus back to the remote screen once the menu closes.
+    LaunchedEffect(menuOpen) { if (!menuOpen) focusRequester.requestFocus() }
+}
 
-            Surface(
-                onClick = { bridge.updateAudioMuted(!bridge.audioMuted) },
-                shape = MaterialTheme.shapes.small,
-                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
-                modifier = Modifier.size(40.dp),
-            ) {
-                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                    // No icon font wired up here yet -- plain glyphs match
-                    // the "Aa"/"1:1" resize-mode toggle right next to it.
-                    Text(
-                        if (bridge.audioMuted) "Mu" else "Au",
-                        style = MaterialTheme.typography.labelSmall,
-                    )
-                }
-            }
+private val MENU_HANDLE_SIZE = 36.dp
+private val MENU_HANDLE_MARGIN = 8.dp
 
+/**
+ * The session menu (resolution mode, audio, handle visibility,
+ * disconnect) and its small floating handle.
+ *
+ * The handle is the only on-screen control, so it covers as little of
+ * the remote desktop as possible: it's small and translucent, it can be
+ * dragged anywhere (position persisted via [VncBridge.menuHandleX]/[Y]),
+ * and it can be hidden entirely -- the menu stays reachable via F8 or
+ * Back (handled in [SessionScreen]). Pointer input outside the handle
+ * goes straight to the remote screen beneath it.
+ */
+@Composable
+private fun SessionMenu(
+    bridge: VncBridge,
+    containerSize: IntSize,
+    menuOpen: Boolean,
+    onMenuOpenChange: (Boolean) -> Unit,
+) {
+    val density = LocalDensity.current
+    val handlePx = with(density) { MENU_HANDLE_SIZE.toPx() }
+    val marginPx = with(density) { MENU_HANDLE_MARGIN.toPx() }
+    val freeW = (containerSize.width - handlePx - 2 * marginPx).coerceAtLeast(0f)
+    val freeH = (containerSize.height - handlePx - 2 * marginPx).coerceAtLeast(0f)
+    val savedPos = Offset(marginPx + bridge.menuHandleX * freeW, marginPx + bridge.menuHandleY * freeH)
+    val currentSavedPos by rememberUpdatedState(savedPos)
+    // Live position while a drag is in progress; null otherwise.
+    var dragPos by remember { mutableStateOf<Offset?>(null) }
+    val pos = dragPos ?: savedPos
+
+    Box(
+        modifier = Modifier
+            .offset { IntOffset(pos.x.roundToInt(), pos.y.roundToInt()) }
+            .size(MENU_HANDLE_SIZE),
+    ) {
+        if (!bridge.menuHandleHidden) {
             Surface(
-                onClick = { bridge.disconnect() },
-                shape = MaterialTheme.shapes.small,
-                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
-                modifier = Modifier.size(40.dp),
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.6f),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(freeW, freeH) {
+                        detectDragGestures(
+                            onDragStart = { dragPos = currentSavedPos },
+                            onDrag = { change, amount ->
+                                change.consume()
+                                val p = (dragPos ?: currentSavedPos) + amount
+                                dragPos = Offset(
+                                    p.x.coerceIn(marginPx, marginPx + freeW),
+                                    p.y.coerceIn(marginPx, marginPx + freeH),
+                                )
+                            },
+                            onDragEnd = {
+                                dragPos?.let {
+                                    bridge.updateMenuHandlePosition(
+                                        if (freeW > 0f) (it.x - marginPx) / freeW else 1f,
+                                        if (freeH > 0f) (it.y - marginPx) / freeH else 0f,
+                                    )
+                                }
+                                dragPos = null
+                            },
+                            onDragCancel = { dragPos = null },
+                        )
+                    }
+                    .pointerInput(Unit) { detectTapGestures { onMenuOpenChange(true) } },
             ) {
                 Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                    Text("×", style = MaterialTheme.typography.headlineSmall)
+                    Text("⋮", style = MaterialTheme.typography.titleMedium)
                 }
             }
         }
+
+        // Anchored to the handle's spot even while it's hidden, so F8/Back
+        // open the menu in the same place.
+        DropdownMenu(expanded = menuOpen, onDismissRequest = { onMenuOpenChange(false) }) {
+            // The open menu (a focusable popup) receives all key input;
+            // make Escape and F8 close it, like vncviewer's F8 menu,
+            // instead of the keys silently going nowhere.
+            val menuFocus = remember { FocusRequester() }
+            LaunchedEffect(Unit) { menuFocus.requestFocus() }
+            Column(
+                modifier = Modifier
+                    .focusRequester(menuFocus)
+                    .focusable()
+                    .onKeyEvent { event ->
+                        val code = event.nativeKeyEvent.keyCode
+                        if (code != android.view.KeyEvent.KEYCODE_ESCAPE &&
+                            code != android.view.KeyEvent.KEYCODE_F8
+                        ) {
+                            return@onKeyEvent false
+                        }
+                        if (event.type == KeyEventType.KeyDown) onMenuOpenChange(false)
+                        true
+                    },
+            ) {
+                DropdownMenuItem(
+                    // Readable: dp-based remote size, legible remote UI.
+                    // Sharp: raw pixels, crisper but smaller remote UI.
+                    text = { Text(if (bridge.useReadableResize) "Resolution: Readable" else "Resolution: Sharp (1:1)") },
+                    onClick = {
+                        bridge.updateUseReadableResize(!bridge.useReadableResize)
+                        onMenuOpenChange(false)
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text(if (bridge.audioMuted) "Unmute audio" else "Mute audio") },
+                    onClick = {
+                        bridge.updateAudioMuted(!bridge.audioMuted)
+                        onMenuOpenChange(false)
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text(if (bridge.menuHandleHidden) "Show menu button" else "Hide menu button") },
+                    onClick = {
+                        bridge.updateMenuHandleHidden(!bridge.menuHandleHidden)
+                        onMenuOpenChange(false)
+                    },
+                )
+                HorizontalDivider()
+                DropdownMenuItem(
+                    text = { Text("Disconnect", color = MaterialTheme.colorScheme.error) },
+                    onClick = {
+                        onMenuOpenChange(false)
+                        bridge.disconnect()
+                    },
+                )
+                Text(
+                    "Open this menu: F8 or Back",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                )
+            }
+        }
     }
+}
+
+/**
+ * VNC button mask for [change]: a mouse reports its real buttons
+ * (primary/secondary/tertiary -> LEFT/RIGHT/MIDDLE); touch and stylus
+ * contact is a left press only while actually down, so stylus hover
+ * stays a plain move.
+ */
+private fun vncButtonMask(event: PointerEvent, change: PointerInputChange): Int {
+    if (change.type == PointerType.Mouse) {
+        var mask = 0
+        if (event.buttons.isPrimaryPressed) mask = mask or VncButtons.LEFT
+        if (event.buttons.isSecondaryPressed) mask = mask or VncButtons.RIGHT
+        if (event.buttons.isTertiaryPressed) mask = mask or VncButtons.MIDDLE
+        return mask
+    }
+    return if (change.pressed) VncButtons.LEFT else 0
 }
 
 private data class AspectFit(val offsetX: Float, val offsetY: Float, val width: Float, val height: Float)
