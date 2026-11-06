@@ -93,13 +93,17 @@ private:
   bool wantDisconnect_ = false;
   bool wantRefresh_ = false;
   bool wantRequestClipboard_ = false;
-  bool havePendingPointer_ = false;
-  OutgoingPointer pendingPointer_{};
+  // Pointer events in send order. Consecutive events with the same
+  // button mask (plain motion) coalesce into the last one, since only
+  // the latest position matters; a button-mask change is always queued,
+  // so a quick press+release (a tap, or a wheel click's press then
+  // release) can't overwrite its own press before the worker sends it.
+  std::vector<OutgoingPointer> pendingPointers_;
   std::vector<OutgoingKey> pendingKeys_;
   std::vector<std::string> pendingClipboard_;
 
   // Only the latest requested size matters, so a resize request
-  // coalesces (like pendingPointer_) rather than queuing like
+  // coalesces (like pointer motion) rather than queuing like
   // pendingKeys_/pendingClipboard_.
   bool wantResize_ = false;
   int resizeWidth_ = 0;

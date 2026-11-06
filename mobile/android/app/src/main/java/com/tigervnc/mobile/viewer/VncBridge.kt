@@ -32,8 +32,17 @@ object VncButtons {
 class VncBridge(context: Context) {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var nativeHandle: Long = 0
-    private val prefs = context.applicationContext
+    private val appContext = context.applicationContext
+    private val prefs = appContext
         .getSharedPreferences("tigervnc_prefs", Context.MODE_PRIVATE)
+
+    /** Whether the owning Activity is stopped (not visible). While a
+     * session is connected and the app is backgrounded, the session is
+     * kept alive by [SessionKeepAliveService] for [BACKGROUND_TIMEOUT_MS],
+     * then disconnected. Main thread only. */
+    private var backgrounded = false
+    private var backgroundDeadline = 0L
+    private val backgroundTimeout = Runnable { disconnect() }
 
     var state by mutableStateOf(VncConnState.DISCONNECTED)
         private set
@@ -73,8 +82,60 @@ class VncBridge(context: Context) {
         prefs.edit().putBoolean(KEY_USE_READABLE_RESIZE, value).apply()
     }
 
+    /** Where SessionScreen's floating menu handle sits, as fractions
+     * (0..1) of the free space in each axis -- so it stays in the same
+     * relative spot across rotation/window resizes. Default top-right. */
+    var menuHandleX by mutableStateOf(prefs.getFloat(KEY_MENU_HANDLE_X, 1f))
+        private set
+    var menuHandleY by mutableStateOf(prefs.getFloat(KEY_MENU_HANDLE_Y, 0f))
+        private set
+    /** Whether the menu handle is hidden (the menu is then only reachable
+     * via F8 or Back -- see SessionScreen). */
+    var menuHandleHidden by mutableStateOf(prefs.getBoolean(KEY_MENU_HANDLE_HIDDEN, false))
+        private set
+
+    fun updateMenuHandlePosition(x: Float, y: Float) {
+        menuHandleX = x.coerceIn(0f, 1f)
+        menuHandleY = y.coerceIn(0f, 1f)
+        prefs.edit().putFloat(KEY_MENU_HANDLE_X, menuHandleX).putFloat(KEY_MENU_HANDLE_Y, menuHandleY).apply()
+    }
+
+    fun updateMenuHandleHidden(hidden: Boolean) {
+        menuHandleHidden = hidden
+        prefs.edit().putBoolean(KEY_MENU_HANDLE_HIDDEN, hidden).apply()
+    }
+
     init {
         nativeHandle = nativeCreate()
+        SessionKeepAliveService.onDisconnectRequested = { mainHandler.post { disconnect() } }
+    }
+
+    /** Called by the UI on Activity start (false) / stop (true). */
+    fun setBackgrounded(value: Boolean) {
+        if (backgrounded == value) return
+        backgrounded = value
+        updateKeepAlive()
+    }
+
+    /** Syncs the keep-alive service and background timeout with the
+     * current connection state and visibility. Main thread only. */
+    private fun updateKeepAlive() {
+        if (state != VncConnState.CONNECTED) {
+            mainHandler.removeCallbacks(backgroundTimeout)
+            backgroundDeadline = 0L
+            SessionKeepAliveService.stop(appContext)
+            return
+        }
+        if (backgrounded) {
+            if (backgroundDeadline == 0L) {
+                backgroundDeadline = System.currentTimeMillis() + BACKGROUND_TIMEOUT_MS
+                mainHandler.postDelayed(backgroundTimeout, BACKGROUND_TIMEOUT_MS)
+            }
+        } else {
+            mainHandler.removeCallbacks(backgroundTimeout)
+            backgroundDeadline = 0L
+        }
+        SessionKeepAliveService.start(appContext, "$lastHost:$lastPort", backgroundDeadline)
     }
 
     fun connect(host: String, port: Int, shared: Boolean = true) {
@@ -136,6 +197,9 @@ class VncBridge(context: Context) {
 
     /** Must be called when the owning screen is torn down. */
     fun destroy() {
+        mainHandler.removeCallbacks(backgroundTimeout)
+        SessionKeepAliveService.stop(appContext)
+        SessionKeepAliveService.onDisconnectRequested = null
         if (nativeHandle != 0L) {
             nativeDestroy(nativeHandle)
             nativeHandle = 0
@@ -146,8 +210,11 @@ class VncBridge(context: Context) {
 
     private fun onStateChanged(stateOrdinal: Int, message: String?) {
         mainHandler.post {
-            state = VncConnState.entries[stateOrdinal]
+            val newState = VncConnState.entries[stateOrdinal]
+            val changed = newState != state
+            state = newState
             errorMessage = message
+            if (changed) updateKeepAlive()
         }
     }
 
@@ -211,8 +278,15 @@ class VncBridge(context: Context) {
 
     companion object {
         private const val KEY_USE_READABLE_RESIZE = "use_readable_resize"
+        private const val KEY_MENU_HANDLE_X = "menu_handle_x"
+        private const val KEY_MENU_HANDLE_Y = "menu_handle_y"
+        private const val KEY_MENU_HANDLE_HIDDEN = "menu_handle_hidden"
         private const val KEY_LAST_HOST = "last_host"
         private const val KEY_LAST_PORT = "last_port"
+
+        /** How long a connected session survives with the app in the
+         * background before it is disconnected. */
+        const val BACKGROUND_TIMEOUT_MS = 5 * 60 * 1000L
 
         init {
             System.loadLibrary("vncjni")
